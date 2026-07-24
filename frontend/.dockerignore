@@ -4,11 +4,7 @@ out
 build
 npm-debug.log
 .env
-.env.local
 *.tar.gz
 *.zip
 *.gz
-coverage/
-README.md
-eslint.config.mjs
-tsconfig.tsbuildinfo
+Dockerfile.prod

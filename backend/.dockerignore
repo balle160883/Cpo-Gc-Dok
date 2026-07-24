@@ -4,12 +4,7 @@ npm-debug.log
 .env
 *.tar.gz
 *.zip
-*.gz
 *.log
 scratch/
-coverage/
-test/
-*.spec.ts
-.prettierrc
-eslint.config.mjs
-README.md
+Dockerfile.final
+Dockerfile.fix
