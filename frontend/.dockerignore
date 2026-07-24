@@ -1,8 +1,14 @@
 node_modules
+.next
 out
 build
 npm-debug.log
 .env
-backend.zip
-frontend.zip
+.env.local
+*.tar.gz
 *.zip
+*.gz
+coverage/
+README.md
+eslint.config.mjs
+tsconfig.tsbuildinfo

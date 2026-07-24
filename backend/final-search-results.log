@@ -1,4 +1,0 @@
---- Resultados Finales para "GOMEZ OLMEDO ANTONIO" ---
-[asignacion_gestores]: Encontrados 319 registros.
-Ejemplo de asignación: {"GESTOR ASIGNADO":"GOMEZ OLMEDO ANTONIO","NoSOCIO":"00064550","NoCUENTA":"0-243419"}
-Columnas en [usuarios_gestor]: id, email, password_hash, gestor, created_at, rol
