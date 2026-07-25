@@ -6,7 +6,6 @@ import 'mapbox-gl/dist/mapbox-gl.css';
 import { fetchGestoresLocations } from '@/lib/api';
 import { MapPin, User, Clock, Navigation } from 'lucide-react';
 
-// Token de Mapbox (extraído de variables de entorno)
 const MAPBOX_TOKEN = process.env.NEXT_PUBLIC_MAPBOX_TOKEN || '';
 
 interface GestorLocation {
@@ -24,20 +23,35 @@ export default function GestoresMapaPage() {
   const markers = useRef<Map<string, mapboxgl.Marker>>(new Map());
   const [locations, setLocations] = useState<GestorLocation[]>([]);
   const [loading, setLoading] = useState(true);
+  const [mapError, setMapError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!mapContainer.current) return;
 
-    mapboxgl.accessToken = MAPBOX_TOKEN;
+    if (!MAPBOX_TOKEN) {
+      setMapError('Token de Mapbox no configurado. Agrega NEXT_PUBLIC_MAPBOX_TOKEN en los Build-time Arguments de Dokploy.');
+      setLoading(false);
+      return;
+    }
 
-    map.current = new mapboxgl.Map({
-      container: mapContainer.current,
-      style: 'mapbox://styles/mapbox/dark-v11', // Estilo premium oscuro
-      center: [-102.5528, 23.6345], // México central
-      zoom: 5,
-    });
+    try {
+      mapboxgl.accessToken = MAPBOX_TOKEN;
 
-    map.current.addControl(new mapboxgl.NavigationControl(), 'top-right');
+      map.current = new mapboxgl.Map({
+        container: mapContainer.current,
+        style: 'mapbox://styles/mapbox/dark-v11', // Estilo premium oscuro
+        center: [-102.5528, 23.6345], // México central
+        zoom: 5,
+      });
+
+      map.current.addControl(new mapboxgl.NavigationControl(), 'top-right');
+    } catch (e: any) {
+      console.error('Error al inicializar Mapbox GL:', e);
+      setMapError('Error al inicializar el mapa. Verifica tu token de Mapbox.');
+      setLoading(false);
+      return;
+    }
+
 
     const updateLocations = async () => {
       try {
@@ -167,7 +181,19 @@ export default function GestoresMapaPage() {
             Mapbox High-Precision Engine
           </div>
           
-          {loading && (
+          {mapError && (
+            <div className="absolute inset-0 bg-slate-900/80 backdrop-blur-md flex items-center justify-center z-30 p-6">
+              <div className="bg-white p-6 rounded-2xl shadow-2xl max-w-md text-center flex flex-col items-center gap-3">
+                <div className="w-12 h-12 bg-amber-100 text-amber-600 rounded-full flex items-center justify-center font-bold text-xl">
+                  !
+                </div>
+                <h3 className="font-semibold text-slate-800 text-lg">Configuración de Mapbox Requerida</h3>
+                <p className="text-slate-600 text-sm">{mapError}</p>
+              </div>
+            </div>
+          )}
+
+          {loading && !mapError && (
             <div className="absolute inset-0 bg-slate-900/10 backdrop-blur-sm flex items-center justify-center z-20">
               <div className="bg-white p-6 rounded-2xl shadow-2xl flex flex-col items-center gap-4">
                 <div className="w-10 h-10 border-4 border-blue-500/20 border-t-blue-500 rounded-full animate-spin" />
@@ -175,6 +201,7 @@ export default function GestoresMapaPage() {
               </div>
             </div>
           )}
+
         </div>
       </div>
       
