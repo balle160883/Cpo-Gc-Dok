@@ -1,4 +1,17 @@
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
+function getApiUrl(): string {
+  if (process.env.NEXT_PUBLIC_API_URL) {
+    return process.env.NEXT_PUBLIC_API_URL;
+  }
+  if (typeof window !== 'undefined') {
+    const host = window.location.hostname;
+    if (host.includes('cobranza') && !host.startsWith('api-')) {
+      return `${window.location.protocol}//api-${host}`;
+    }
+  }
+  return 'http://localhost:4000';
+}
+
+const API_URL = getApiUrl();
 
 function getAuthHeader(): Record<string, string> {
   if (typeof window !== 'undefined') {
