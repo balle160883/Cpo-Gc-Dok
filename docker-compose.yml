@@ -10,6 +10,7 @@ services:
       - SUPABASE_URL=https://xygarchwyrflpzywcpid.supabase.co
       - SUPABASE_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inh5Z2FyY2h3eXJmbHB6eXdjcGlkIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3MzE3MzU5NywiZXhwIjoyMDg4NzQ5NTk3fQ.NhK0bVSyLcWAP8EXU35agSs89DCq2LBhRTXv2_P-Y0A
       - JWT_SECRET=cobranza-pro-secret-2026
+      - CORS_ORIGIN=http://cobranza.31.97.144.6.sslip.io,https://cobranza.31.97.144.6.sslip.io,https://vesta-track.cloud,http://localhost:3000
 
   frontend:
     build:
