@@ -58,6 +58,13 @@ export class PortfolioController {
     return this.portfolioService.getAllGestoresLocations();
   }
 
+  @Post('location')
+  async saveLocation(@Request() req: any, @Body() body: { latitud: number; longitud: number }) {
+    const gestorId = req.user.userId || req.user.id;
+    return this.portfolioService.saveGestorLocation(gestorId, body.latitud, body.longitud);
+  }
+
+
   @Get('gestores')
   async getGestores() {
     return this.portfolioService.getAllGestores();

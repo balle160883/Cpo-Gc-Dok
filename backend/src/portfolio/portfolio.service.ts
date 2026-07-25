@@ -278,6 +278,25 @@ export class PortfolioService {
     return Array.from(uniqueLocations.values());
   }
 
+  async saveGestorLocation(gestorId: string, latitud: number, longitud: number) {
+    const { data, error } = await this.supabaseService
+      .getClient()
+      .from('ubicaciones_gestores')
+      .insert({
+        gestor_id: gestorId,
+        latitud,
+        longitud,
+        timestamp: new Date().toISOString(),
+      });
+
+    if (error) {
+      this.logger.error(`Error saving gestor location: ${error.message}`);
+      throw error;
+    }
+    return { success: true };
+  }
+
+
   async getAllGestores() {
     const { data, error } = await this.supabaseService
       .getClient()
