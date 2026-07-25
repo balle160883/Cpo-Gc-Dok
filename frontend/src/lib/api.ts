@@ -1,4 +1,4 @@
-const API_URL = 'https://api.vesta-track.cloud';
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
 
 function getAuthHeader(): Record<string, string> {
   if (typeof window !== 'undefined') {
