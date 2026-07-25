@@ -41,6 +41,17 @@ export class PortfolioController {
     return this.portfolioService.getAsignaciones(limit, effectiveGestorId);
   }
 
+  @Get('avales')
+  async getAvales(
+    @Request() req: any,
+    @Query('limit') limit: number,
+    @Query('gestorId') gestorId?: string,
+  ) {
+    const rawGestorId = req.user.rol === 'admin' ? gestorId : (gestorId || req.user.gestorId);
+    const effectiveGestorId = (rawGestorId && rawGestorId.trim() !== '') ? rawGestorId : undefined;
+    return this.portfolioService.getAvales(limit, effectiveGestorId);
+  }
+
   @Get('recuperacion')
   async getRecuperacion(
     @Request() req: any, 

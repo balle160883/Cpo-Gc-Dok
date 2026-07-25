@@ -112,6 +112,26 @@ export class PortfolioService {
     return data;
   }
 
+  async getAvales(limit = 200, gestorId?: string) {
+    let query = this.supabaseService
+      .getClient()
+      .from('asignacion_avales')
+      .select('*')
+      .limit(limit);
+
+    if (gestorId) {
+      query = query.eq('gestor_asignado', gestorId);
+    }
+
+    const { data, error } = await query;
+
+    if (error) {
+      this.logger.error(`Error fetching avales: ${error.message}`);
+      return [];
+    }
+    return data || [];
+  }
+
   private _toUTCStartOfDay(dateStr: string): string {
     if (!dateStr) return dateStr;
     const match = dateStr.match(/^\d{4}-\d{2}-\d{2}$/);
