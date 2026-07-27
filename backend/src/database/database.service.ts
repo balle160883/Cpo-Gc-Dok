@@ -289,6 +289,16 @@ export class QueryBuilder {
         cols = cols.replace(/,\s*[a-zA-Z0-9_]+\([^)]*\)/g, '').replace(/[a-zA-Z0-9_]+\([^)]*\)/g, '*').trim();
         if (!cols || cols === ',') cols = '*';
       }
+
+      // Entrecomillar columnas automáticamente si no son '*' ni tienen comillas ni funciones
+      if (cols !== '*') {
+        cols = cols.split(',').map(c => {
+          const trimmed = c.trim();
+          if (!trimmed || trimmed === '*' || trimmed.startsWith('"') || trimmed.includes('(') || trimmed.includes(' ')) return trimmed;
+          return `"${trimmed}"`;
+        }).filter(Boolean).join(', ');
+      }
+
       let sql = `SELECT ${cols} FROM "${this.tableName}" ${whereSql} ${this.orderClause}`;
       if (this.limitVal) {
         sql += ` LIMIT ${this.limitVal}`;
