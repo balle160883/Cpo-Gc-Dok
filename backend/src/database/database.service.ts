@@ -279,7 +279,11 @@ export class QueryBuilder {
         }
       }
 
-      const cols = this.selectedCols.includes('socios_datos') ? '*' : this.selectedCols;
+      let cols = this.selectedCols;
+      if (cols.includes('(') && cols.includes(')')) {
+        cols = cols.replace(/,\s*[a-zA-Z0-9_]+\([^)]*\)/g, '').replace(/[a-zA-Z0-9_]+\([^)]*\)/g, '*').trim();
+        if (!cols || cols === ',') cols = '*';
+      }
       let sql = `SELECT ${cols} FROM "${this.tableName}" ${whereSql} ${this.orderClause}`;
       if (this.limitVal) {
         sql += ` LIMIT ${this.limitVal}`;
