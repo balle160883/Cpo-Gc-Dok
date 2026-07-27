@@ -298,30 +298,43 @@ export class PortfolioService {
   }
 
   async getAllGestoresLocations() {
-    const { data, error } = await this.supabaseService
-      .getClient()
-      .from('ubicaciones_gestores')
-      .select('*, usuarios_gestor(gestor)')
-      .order('timestamp', { ascending: false })
-      .limit(200); // Límite razonable para encontrar la última ubicación de cada gestor sin bajar miles
+    try {
+      const sql = `
+        SELECT ug_loc.id,
+               ug_loc.gestor_id,
+               ug_loc.latitud,
+               ug_loc.longitud,
+               ug_loc.timestamp,
+               ug.gestor AS gestor_name
+        FROM ubicaciones_gestores ug_loc
+        LEFT JOIN usuarios_gestor ug ON ug.id::text = ug_loc.gestor_id::text
+        ORDER BY ug_loc.timestamp DESC
+        LIMIT 500
+      `;
 
-    if (error) {
+      const result = await this.supabaseService.query(sql);
+      const rows = result.rows || [];
+
+      // Filtrar para obtener solo la última ubicación de cada gestor
+      const uniqueLocations = new Map();
+      rows.forEach(loc => {
+        if (!uniqueLocations.has(loc.gestor_id)) {
+          uniqueLocations.set(loc.gestor_id, {
+            id: loc.id,
+            gestor_id: loc.gestor_id,
+            latitud: Number(loc.latitud),
+            longitud: Number(loc.longitud),
+            timestamp: loc.timestamp,
+            gestor_name: loc.gestor_name || 'Gestor'
+          });
+        }
+      });
+
+      return Array.from(uniqueLocations.values());
+    } catch (error: any) {
       this.logger.error(`Error fetching gestores locations: ${error.message}`);
-      throw error;
+      return [];
     }
-
-    // Filtrar para obtener solo la última ubicación de cada gestor
-    const uniqueLocations = new Map();
-    data?.forEach(loc => {
-      if (!uniqueLocations.has(loc.gestor_id)) {
-        uniqueLocations.set(loc.gestor_id, {
-          ...loc,
-          gestor_name: loc.usuarios_gestor?.gestor || 'Gestor'
-        });
-      }
-    });
-
-    return Array.from(uniqueLocations.values());
   }
 
   async saveGestorLocation(gestorId: string, latitud: number, longitud: number) {
