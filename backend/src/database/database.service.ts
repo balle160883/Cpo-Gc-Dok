@@ -1,6 +1,11 @@
 import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { Pool } from 'pg';
+import { Pool, types } from 'pg';
+
+// Forzar que los tipos NUMERIC/DECIMAL (OID 1700) y BIGINT (OID 20) de PostgreSQL
+// se devuelvan como Numbers de JavaScript para evitar crashes (.toFixed is not a function) en la app móvil
+types.setTypeParser(1700, (val: string) => (val === null ? null : parseFloat(val)));
+types.setTypeParser(20, (val: string) => (val === null ? null : parseInt(val, 10)));
 
 export class QueryBuilder {
   private tableName: string;
