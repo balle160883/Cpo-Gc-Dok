@@ -9,30 +9,50 @@ export class PortfolioService {
   constructor(private supabaseService: SupabaseService) {}
 
   async getSocios(limit = 50, gestorId?: string) {
-    let query = this.supabaseService
-      .getClient()
-      .from('socios_datos')
-      .select('*')
-      .limit(limit);
+    try {
+      // Si hay gestorId, cruzamos asignacion_gestores para filtrar por gestor
+      if (gestorId) {
+        const { data: asignaciones } = await this.supabaseService
+          .getClient()
+          .from('asignacion_gestores')
+          .select('NoSOCIO')
+          .eq('GESTOR ASIGNADO', gestorId)
+          .neq('SITUACI\u00d3N DEL CR\u00c9DITO', 'LIQUIDADO');
 
-    if (gestorId) {
-      const { data: asignaciones } = await this.supabaseService
+        const sociosIds = [...new Set((asignaciones || []).map(a => a.NoSOCIO))].filter(Boolean);
+        if (sociosIds.length === 0) return [];
+
+        // La columna correcta en socios_datos es 'friendly_code', no 'numero_socio'
+        const { data, error } = await this.supabaseService
+          .getClient()
+          .from('socios_datos')
+          .select('*')
+          .in('friendly_code', sociosIds)
+          .limit(limit);
+
+        if (error) {
+          this.logger.error(`Error fetching socios con gestorId: ${error.message}`);
+          throw error;
+        }
+        return data || [];
+      }
+
+      // Sin filtro de gestor: devolver todos con l\u00edmite
+      const { data, error } = await this.supabaseService
         .getClient()
-        .from('asignacion_gestores')
-        .select('NoSOCIO')
-        .eq('GESTOR ASIGNADO', gestorId)
-        .neq('SITUACIÓN DEL CRÉDITO', 'LIQUIDADO');
-      
-      const sociosIds = asignaciones?.map(a => a.NoSOCIO) || [];
-      query = query.in('numero_socio', sociosIds);
-    }
+        .from('socios_datos')
+        .select('*')
+        .limit(limit);
 
-    const { data, error } = await query;
-    if (error) {
-      this.logger.error(`Error fetching socios: ${error.message}`);
-      throw error;
+      if (error) {
+        this.logger.error(`Error fetching socios: ${error.message}`);
+        throw error;
+      }
+      return data || [];
+    } catch (e: any) {
+      this.logger.error(`Fatal error in getSocios: ${e.message}`);
+      return [];
     }
-    return data;
   }
 
   async getPrestamosPorSocio(socioId: number, gestorId?: string) {
@@ -62,31 +82,50 @@ export class PortfolioService {
   }
 
   async getCarteraVencida(gestorId?: string) {
-    let query = this.supabaseService
-      .getClient()
-      .from('prestamos_datos')
-      .select('*, socios_datos(nombre_completo)')
-      .gt('saldo_mora', 0)
-      .limit(100); // Límite para evitar consumo excesivo
+    try {
+      const params: any[] = [];
+      let whereExtra = '';
 
-    if (gestorId) {
-       const { data: asignaciones } = await this.supabaseService
-         .getClient()
-         .from('asignacion_gestores')
-         .select('NoCUENTA')
-         .eq('GESTOR ASIGNADO', gestorId);
-       
-       const cuentasIds = asignaciones?.map(a => a.NoCUENTA) || [];
-       query = query.in('num_cuenta', cuentasIds);
+      if (gestorId) {
+        // Obtener cuentas asignadas al gestor
+        const { data: asignaciones } = await this.supabaseService
+          .getClient()
+          .from('asignacion_gestores')
+          .select('NoCUENTA')
+          .eq('GESTOR ASIGNADO', gestorId);
+
+        const cuentas = (asignaciones || []).map(a => a.NoCUENTA).filter(Boolean);
+        if (cuentas.length === 0) return [];
+
+        // Parametrizar lista de cuentas
+        const placeholders = cuentas.map((_, i) => `$${i + 2}`).join(', ');
+        whereExtra = `AND pd.num_cuenta IN (${placeholders})`;
+        params.push(...cuentas);
+      }
+
+      // SQL raw con LEFT JOIN a socios_datos para obtener nombre
+      // El primer parámetro es el límite
+      const limitParam = `$1`;
+      params.unshift(200);
+
+      const sql = `
+        SELECT pd.*,
+               sd.nombre_completo,
+               sd.friendly_code
+        FROM prestamos_datos pd
+        LEFT JOIN socios_datos sd ON pd.socio_id::text = sd.socio_id::text
+        WHERE pd.saldo_mora > 0
+        ${whereExtra}
+        ORDER BY pd.saldo_mora DESC
+        LIMIT ${limitParam}
+      `;
+
+      const result = await this.supabaseService.query(sql, params);
+      return result.rows || [];
+    } catch (e: any) {
+      this.logger.error(`Error fetching cartera vencida: ${e.message}`);
+      return [];
     }
-
-    const { data, error } = await query;
-
-    if (error) {
-      this.logger.error(`Error fetching cartera vencida: ${error.message}`);
-      throw error;
-    }
-    return data;
   }
 
   async getAsignaciones(limit = 1000, gestorId?: string) {
@@ -164,49 +203,58 @@ export class PortfolioService {
     const recoveryDocs: any[] = [];
 
     try {
-      // 1. Obtener de pagos_recuperados
-      let queryPagos = this.supabaseService
-        .getClient()
-        .from('pagos_recuperados')
-        .select('*');
+      // =================================================================
+      // 1. Pagos reales desde pagos_recuperados
+      //    NOTA: gestor_asignado es NULL en estos registros.
+      //    Cruzamos con asignacion_gestores por num_credito para saber el gestor.
+      // =================================================================
+      const pagosParams: any[] = [];
+      let pagosWhere: string[] = [];
 
-      if (startDate) queryPagos = queryPagos.gte('fecha_real', this._toUTCStartOfDay(startDate));
-      if (endDate) queryPagos = queryPagos.lte('fecha_real', this._toUTCEndOfDay(endDate));
-
-      const { data: pagosLog, error: errorPagos } = await queryPagos
-        .order('created_at', { ascending: false })
-        .limit(200);
-
-      if (errorPagos) {
-        this.logger.error(`Error fetching pagos_recuperados: ${errorPagos.message}`);
-      } else if (pagosLog && pagosLog.length > 0) {
-        const cuentas = [...new Set(pagosLog.map(p => p.num_credito))];
-        const { data: gestoresMap } = await this.supabaseService
-          .getClient()
-          .from('asignacion_gestores')
-          .select('NoCUENTA, "GESTOR ASIGNADO"')
-          .in('NoCUENTA', cuentas);
-          
-        const gestorByCuenta = new Map(gestoresMap?.map(g => [g.NoCUENTA, g['GESTOR ASIGNADO']]) || []);
-        
-        pagosLog.forEach(item => {
-          const gestorResponsable = gestorByCuenta.get(item.num_credito) || 'Sistema';
-          if (!gestorId || gestorResponsable === gestorId) {
-            recoveryDocs.push({
-              id: item.id,
-              abono_total: item.abono_total,
-              nombre: item.nombre,
-              numero_socio: item.numero_socio,
-              num_credito: item.num_credito,
-              fecha_real: item.fecha_real || item.created_at || item.fecha,
-              gestor: gestorResponsable,
-              tipo: 'PAGO_REAL'
-            });
-          }
-        });
+      if (startDate) {
+        pagosParams.push(this._toUTCStartOfDay(startDate));
+        pagosWhere.push(`pr.fecha_real >= $${pagosParams.length}`);
+      }
+      if (endDate) {
+        pagosParams.push(this._toUTCEndOfDay(endDate));
+        pagosWhere.push(`pr.fecha_real <= $${pagosParams.length}`);
+      }
+      if (gestorId) {
+        pagosParams.push(gestorId);
+        pagosWhere.push(`ag."GESTOR ASIGNADO" = $${pagosParams.length}`);
       }
 
-      // 2. Obtener de asignacion_gestores
+      pagosParams.push(500);
+      const pagosWhereStr = pagosWhere.length > 0 ? `WHERE ${pagosWhere.join(' AND ')}` : '';
+
+      const pagosSQL = `
+        SELECT pr.id, pr.num_credito, pr.nombre, pr.numero_socio,
+               pr.abono_total, pr.abono_capital, pr.fecha_real, pr.created_at,
+               ag."GESTOR ASIGNADO" as gestor_asignado
+        FROM pagos_recuperados pr
+        LEFT JOIN asignacion_gestores ag ON pr.num_credito = ag."NoCUENTA"
+        ${pagosWhereStr}
+        ORDER BY pr.fecha_real DESC
+        LIMIT $${pagosParams.length}
+      `;
+
+      const pagosResult = await this.supabaseService.query(pagosSQL, pagosParams);
+      (pagosResult.rows || []).forEach((item: any) => {
+        recoveryDocs.push({
+          id: item.id,
+          abono_total: Number(item.abono_total) || 0,
+          nombre: item.nombre,
+          numero_socio: item.numero_socio,
+          num_credito: item.num_credito,
+          fecha_real: item.fecha_real || item.created_at,
+          gestor: item.gestor_asignado || 'Sistema',
+          tipo: 'PAGO_REAL'
+        });
+      });
+
+      // =================================================================
+      // 2. Cartera activa con capital moroso desde asignacion_gestores
+      // =================================================================
       let queryActivos = this.supabaseService
         .getClient()
         .from('asignacion_gestores')
@@ -216,14 +264,15 @@ export class PortfolioService {
       if (startDate) queryActivos = queryActivos.gte('FECHA ASIGNACION', startDate);
       if (endDate) queryActivos = queryActivos.lte('FECHA ASIGNACION', endDate);
 
-      const { data: activos, error: errorActivos } = await queryActivos.limit(100);
+      const { data: activos, error: errorActivos } = await queryActivos.limit(200);
       if (errorActivos) {
         this.logger.error(`Error fetching asignacion_gestores for recovery: ${errorActivos.message}`);
       } else if (activos) {
         activos.forEach(item => {
-          if (item['CAPITAL MOROSO'] > 0 || item['SITUACIÓN DEL CRÉDITO'] === 'LIQUIDADO') {
+          const capitalMoroso = Number(item['CAPITAL MOROSO']) || 0;
+          if (capitalMoroso > 0 || item['SITUACIÓN DEL CRÉDITO'] === 'LIQUIDADO') {
             recoveryDocs.push({
-              abono_total: item['CAPITAL MOROSO'],
+              abono_total: capitalMoroso,
               nombre: item.NOMBRE,
               numero_socio: item.NoSOCIO,
               num_credito: item.NoCUENTA,
@@ -232,36 +281,6 @@ export class PortfolioService {
               tipo: 'CARTERA_ACTIVA'
             });
           }
-        });
-      }
-
-      // 3. Obtener de recuperaciones_archivadas
-      let histQuery = this.supabaseService
-        .getClient()
-        .from('recuperaciones_archivadas')
-        .select('gestor_asignado, capital_moroso, nosocio, nombre, nocuenta, fecha_asignacion');
-      
-      if (gestorId) histQuery = histQuery.eq('gestor_asignado', gestorId);
-      if (startDate) histQuery = histQuery.gte('fecha_asignacion', startDate);
-      if (endDate) histQuery = histQuery.lte('fecha_asignacion', endDate);
-
-      const { data: historicos, error: errorHistoricos } = await histQuery
-        .order('fecha_asignacion', { ascending: false })
-        .limit(100);
-
-      if (errorHistoricos) {
-        this.logger.error(`Error fetching recuperaciones_archivadas: ${errorHistoricos.message}`);
-      } else if (historicos) {
-        historicos.forEach(item => {
-          recoveryDocs.push({
-            abono_total: item.capital_moroso,
-            nombre: item.nombre,
-            numero_socio: item.nosocio,
-            num_credito: item.nocuenta,
-            fecha_real: item.fecha_asignacion,
-            gestor: item.gestor_asignado,
-            tipo: 'ARCHIVO'
-          });
         });
       }
 
