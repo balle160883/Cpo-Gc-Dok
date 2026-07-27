@@ -413,6 +413,17 @@ export class CrmService {
     return this._mapInteraccionesConAsignacion(uniqueData);
   }
 
+  private _extractMonto(desc: string): number {
+    if (!desc) return 0;
+    const match = desc.match(/(?:\$|abonará\s*|abona\s*|monto\s*|\$\s*)(\d{1,3}(?:,\d{3})*(?:\.\d+)?|\d+)/i);
+    if (match) {
+      const valStr = match[1].replace(/,/g, '');
+      const num = parseFloat(valStr);
+      if (!isNaN(num) && num > 50 && num < 1000000) return num;
+    }
+    return 0;
+  }
+
   async getPromesasPendientes(gestorId?: string, startDate?: string, endDate?: string) {
     let resolvedGestorId: string | null = null;
     let gestorName: string | null = null;
@@ -431,8 +442,7 @@ export class CrmService {
     }
 
     // =====================================================================
-    // 1. Promesas formales en cobranza_promesas vinculadas via interaccion_id
-    //    NOTA: la mayoria tiene interaccion_id, no prestamo_id
+    // 1. Interacciones con resultado 'promesa_pago'
     // =====================================================================
     const intParams: any[] = [];
     const intWhere: string[] = [`ci.resultado = 'promesa_pago'`];
@@ -450,7 +460,7 @@ export class CrmService {
       intWhere.push(`ci.fecha_gestion <= $${intParams.length}`);
     }
 
-    intParams.push(500);
+    intParams.push(3000);
     const intWhereStr = intWhere.length > 0 ? `WHERE ${intWhere.join(' AND ')}` : '';
 
     const intSQL = `
@@ -474,10 +484,21 @@ export class CrmService {
       this.logger.error(`Error fetching interacciones promesas: ${e.message}`);
     }
 
+    // Deduplicar para tomar la última promesa por socio
+    const uniqueBySocio = new Map<string, any>();
+    interacciones.forEach(item => {
+      const sKey = String(item.socio_id || '').trim();
+      if (sKey && !uniqueBySocio.has(sKey)) {
+        uniqueBySocio.set(sKey, item);
+      }
+    });
+
+    const dedupedList = Array.from(uniqueBySocio.values());
+
     // =====================================================================
     // 2. Enriquecer con nombre de socio desde asignacion_gestores
     // =====================================================================
-    const uniqueSocioIds = [...new Set(interacciones.map(i => i.socio_id).filter(Boolean))];
+    const uniqueSocioIds = [...new Set(dedupedList.map(i => i.socio_id).filter(Boolean))];
     let avalesMap: Map<string, any> = new Map();
 
     if (uniqueSocioIds.length > 0) {
@@ -485,15 +506,13 @@ export class CrmService {
         'asignacion_gestores', 'NoSOCIO', uniqueSocioIds,
         'NoSOCIO, NoCUENTA, NOMBRE, "NOMBRE D.A.1", "NOMBRE D.A.2", "FECHA ASIGNACION"'
       );
-      avalesData.forEach((a: any) => avalesMap.set(a.NoSOCIO, a));
+      avalesData.forEach((a: any) => avalesMap.set(String(a.NoSOCIO).trim(), a));
     }
 
     // =====================================================================
-    // 3. Deduplicar y mapear
+    // 3. Mapear respuesta
     // =====================================================================
-    const deduped = this._deduplicateInteracciones(interacciones);
-
-    return deduped.map(i => {
+    return dedupedList.map(i => {
       const sujetoEfectivo = this._getSujetoEfectivo(i);
       const isAval = sujetoEfectivo.startsWith('Aval');
       const iStr = String(i.socio_id || '').trim();
@@ -505,11 +524,13 @@ export class CrmService {
       else if (sujetoEfectivo === 'Aval 2') avalName = asig?.['NOMBRE D.A.2'];
       else avalName = asig?.['NOMBRE D.A.1'] || asig?.['NOMBRE D.A.2'];
 
+      const montoNum = Number(i.monto_prometido || 0) || this._extractMonto(i.descripcion);
+
       return {
         id: i.id,
         is_informal: !i.promesa_id,
-        num_cuenta: i.num_cuenta || asig?.NoCUENTA || 'BitÃ¡cora',
-        monto: Number(i.monto_prometido || 0),
+        num_cuenta: i.num_cuenta || asig?.NoCUENTA || 'Bitácora',
+        monto: montoNum,
         fecha_pago: i.fecha_promesa || i.fecha_gestion,
         estado: i.estado || 'pendiente',
         descripcion: i.descripcion,
@@ -528,5 +549,6 @@ export class CrmService {
     });
   }
 }
+
 
 
