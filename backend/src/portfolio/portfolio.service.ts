@@ -93,13 +93,17 @@ export class PortfolioService {
     let query = this.supabaseService
       .getClient()
       .from('asignacion_gestores')
-      .select('*')
-      .limit(limit);
+      .select('*');
 
     if (gestorId) {
       query = query.eq('GESTOR ASIGNADO', gestorId)
                    .neq('SITUACIÓN DEL CRÉDITO', 'LIQUIDADO');
     }
+
+    // Para dar soporte a APKs instalados que envían limit=200, forzamos un mínimo de 1000 cuando hay gestorId
+    const numLimit = Number(limit);
+    const effectiveLimit = gestorId ? Math.max(isNaN(numLimit) ? 1000 : numLimit, 1000) : (isNaN(numLimit) ? 1000 : numLimit);
+    query = query.limit(effectiveLimit);
 
     query = query.order('FECHA ASIGNACION', { ascending: false });
 
@@ -116,12 +120,15 @@ export class PortfolioService {
     let query = this.supabaseService
       .getClient()
       .from('asignacion_avales')
-      .select('*')
-      .limit(limit);
+      .select('*');
 
     if (gestorId) {
       query = query.eq('gestor_asignado', gestorId);
     }
+
+    const numLimit = Number(limit);
+    const effectiveLimit = gestorId ? Math.max(isNaN(numLimit) ? 1000 : numLimit, 1000) : (isNaN(numLimit) ? 1000 : numLimit);
+    query = query.limit(effectiveLimit);
 
     const { data, error } = await query;
 
