@@ -89,7 +89,7 @@ export class PortfolioService {
     return data;
   }
 
-  async getAsignaciones(limit = 100, gestorId?: string) {
+  async getAsignaciones(limit = 1000, gestorId?: string) {
     let query = this.supabaseService
       .getClient()
       .from('asignacion_gestores')
@@ -112,7 +112,7 @@ export class PortfolioService {
     return data;
   }
 
-  async getAvales(limit = 200, gestorId?: string) {
+  async getAvales(limit = 1000, gestorId?: string) {
     let query = this.supabaseService
       .getClient()
       .from('asignacion_avales')
