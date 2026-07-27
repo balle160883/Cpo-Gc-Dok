@@ -144,7 +144,7 @@ export default function GestionesPage() {
         'Nombre Socio': item.socios_datos?.nombre_completo || item.asignacion?.NOMBRE || '',
         'Nombre Aval': esAvalExcel ? (item.nombre_visitado || '') : '',
         'Nombre Visitado': item.nombre_visitado || item.socios_datos?.nombre_completo || item.asignacion?.NOMBRE || '',
-        'Gestor': item.usuarios_gestor?.gestor || 'Sistema',
+        'Gestor': item.gestor_nombre || 'Sistema',
         'Sujeto Visitado': sujetoExcel,
         'Inicio Gestión': safeFormatDate(item.fecha_inicio_gestion, false),
         'Comentarios': item.descripcion || '',
@@ -403,7 +403,7 @@ export default function GestionesPage() {
                     <CheckCircle2 size={12} /> {item.resultado || 'Exitoso'}
                   </div>
                   <div className="text-[10px] text-slate-400 font-bold uppercase flex items-center gap-1 ml-auto">
-                    <User size={12} className="text-blue-400" /> <span className="text-slate-600">{item.usuarios_gestor?.gestor || 'Sistema'}</span>
+                    <User size={12} className="text-blue-400" /> <span className="text-slate-600">{item.gestor_nombre || 'Sistema'}</span>
                   </div>
                 </div>
               </div>

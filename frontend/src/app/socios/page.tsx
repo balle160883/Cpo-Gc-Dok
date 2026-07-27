@@ -579,7 +579,7 @@ export default function SociosPage() {
                           <div className="flex items-center gap-1 text-[9px] font-black text-emerald-600 uppercase bg-emerald-50 px-2 py-0.5 rounded-md">
                             <CheckCircle2 size={10} /> {h.resultado}
                           </div>
-                          <div className="text-[9px] text-slate-400 font-bold uppercase ml-auto">Gestor: {h.usuarios_gestor?.gestor || 'Sistema'}</div>
+                          <div className="text-[9px] text-slate-400 font-bold uppercase ml-auto">Gestor: {h.gestor_nombre || 'Sistema'}</div>
                         </div>
                       </div>
                     ))}

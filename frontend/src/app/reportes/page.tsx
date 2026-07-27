@@ -93,7 +93,7 @@ export default function ReportesPage() {
         'Nombre Socio': item.socios_datos?.nombre_completo || item.asignacion?.NOMBRE || '',
         'Nombre Aval': esAvalExcel ? (item.nombre_visitado || '') : '',
         'Nombre Visitado': item.nombre_visitado || item.socios_datos?.nombre_completo || item.asignacion?.NOMBRE || '',
-        'Gestor': item.usuarios_gestor?.gestor || 'Sistema',
+        'Gestor': item.gestor_nombre || 'Sistema',
         'Sujeto Visitado': sujetoExcel,
         'Inicio Gestión': safeFormatDate(item.fecha_inicio_gestion, false),
         'Comentarios': item.descripcion || '',
