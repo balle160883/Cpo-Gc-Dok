@@ -305,20 +305,22 @@ export class CrmService {
   }
 
   async getInteraccionesSocio(socioId: number) {
-    const { data, error } = await this.supabaseService
-      .getClient()
-      .from('cobranza_interacciones')
-      .select('*, usuarios_gestor(gestor)')
-      .eq('socio_id', socioId)
-      .order('fecha_gestion', { ascending: false });
+    const result = await this.supabaseService.query(`
+      SELECT ci.*,
+             ug.gestor AS gestor_nombre
+      FROM cobranza_interacciones ci
+      LEFT JOIN usuarios_gestor ug ON ci.gestor_id = ug.id
+      WHERE ci.socio_id = $1::text
+      ORDER BY ci.fecha_gestion DESC
+    `, [String(socioId)]);
 
-    if (error) {
-      this.logger.error(`Error fetching interactions: ${error.message}`);
-      throw error;
+    if (!result.rows) {
+      this.logger.error(`Error fetching interactions for socio ${socioId}`);
+      return [];
     }
 
     // Deduplicate in memory before doing joins using 120s window
-    const uniqueData = this._deduplicateInteracciones(data || []);
+    const uniqueData = this._deduplicateInteracciones(result.rows || []);
 
     return this._mapInteraccionesConAsignacion(uniqueData);
   }
@@ -334,42 +336,61 @@ export class CrmService {
       resolvedGestorId = gData && gData.length > 0 ? gData[0].id : '00000000-0000-0000-0000-000000000000';
     }
 
-    // Lógica de Paginación Automática para superar el límite de 1,000 de Postgrest/Supabase
+    // Usar SQL raw con JOIN para obtener el nombre del gestor correctamente
+    // (PostgREST join syntax no es compatible con el QueryBuilder de PostgreSQL nativo)
     let allData: any[] = [];
-    let from = 0;
+    let offset = 0;
     const PAGE_SIZE = 1000;
     let hasMore = true;
 
     while (hasMore) {
-      const to = from + PAGE_SIZE - 1;
-      let paginatedQuery = this.supabaseService
-        .getClient()
-        .from('cobranza_interacciones')
-        .select('*, usuarios_gestor(gestor)')
-        .order('fecha_gestion', { ascending: false })
-        .range(from, to);
+      const params: any[] = [];
+      let whereClauses: string[] = [];
 
-      if (resolvedGestorId) paginatedQuery = paginatedQuery.eq('gestor_id', resolvedGestorId);
-      if (startDate) paginatedQuery = paginatedQuery.gte('fecha_gestion', this._toUTCStartOfDay(startDate));
-      if (endDate) paginatedQuery = paginatedQuery.lte('fecha_gestion', this._toUTCEndOfDay(endDate));
-
-
-      const { data: pageData, error } = await paginatedQuery;
-
-      if (error) {
-        this.logger.error(`Error fetching page [${from}-${to}]: ${error.message}`);
-        throw error;
+      if (resolvedGestorId) {
+        params.push(resolvedGestorId);
+        whereClauses.push(`ci.gestor_id = $${params.length}::uuid`);
+      }
+      if (startDate) {
+        params.push(this._toUTCStartOfDay(startDate));
+        whereClauses.push(`ci.fecha_gestion >= $${params.length}`);
+      }
+      if (endDate) {
+        params.push(this._toUTCEndOfDay(endDate));
+        whereClauses.push(`ci.fecha_gestion <= $${params.length}`);
       }
 
-      if (pageData && pageData.length > 0) {
-        allData = [...allData, ...pageData];
-        if (pageData.length < PAGE_SIZE) {
-          hasMore = false;
+      const whereStr = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
+      params.push(PAGE_SIZE);
+      params.push(offset);
+
+      const sql = `
+        SELECT ci.*,
+               ug.gestor AS gestor_nombre
+        FROM cobranza_interacciones ci
+        LEFT JOIN usuarios_gestor ug ON ci.gestor_id = ug.id
+        ${whereStr}
+        ORDER BY ci.fecha_gestion DESC
+        LIMIT $${params.length - 1} OFFSET $${params.length}
+      `;
+
+      try {
+        const result = await this.supabaseService.query(sql, params);
+        const pageData = result.rows;
+
+        if (pageData && pageData.length > 0) {
+          allData = [...allData, ...pageData];
+          if (pageData.length < PAGE_SIZE) {
+            hasMore = false;
+          } else {
+            offset += PAGE_SIZE;
+          }
         } else {
-          from += PAGE_SIZE;
+          hasMore = false;
         }
-      } else {
-        hasMore = false;
+      } catch (err: any) {
+        this.logger.error(`Error fetching page [${offset}-${offset + PAGE_SIZE - 1}]: ${err.message}`);
+        throw err;
       }
 
       // Seguridad: No recuperar más de 5,000 en un solo reporte para evitar timeout del backend

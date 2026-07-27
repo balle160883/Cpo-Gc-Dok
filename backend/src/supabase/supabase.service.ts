@@ -16,4 +16,9 @@ export class SupabaseService {
   from(tableName: string) {
     return this.databaseService.from(tableName);
   }
+
+  // SQL raw con parámetros, para JOINs que no soporta el QueryBuilder
+  async query(text: string, params?: any[]) {
+    return this.databaseService.query(text, params);
+  }
 }
