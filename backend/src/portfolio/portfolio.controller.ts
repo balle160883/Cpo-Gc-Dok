@@ -1,13 +1,22 @@
-import { Controller, Get, Param, Query, UseGuards, Request, Patch, Body, Post, UseInterceptors, UploadedFile } from '@nestjs/common';
+import { Controller, Get, Param, Query, UseGuards, Request, Patch, Body, Post, UseInterceptors, UploadedFile, Sse, MessageEvent } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { PortfolioService } from './portfolio.service';
 import { AuthGuard } from '@nestjs/passport';
 import { RentaGuard } from '../renta/renta.guard';
+import { Observable } from 'rxjs';
+import { map } from 'rxjs/operators';
 
 @UseGuards(AuthGuard('jwt'), RentaGuard)
 @Controller('portfolio')
 export class PortfolioController {
   constructor(private readonly portfolioService: PortfolioService) {}
+
+  @Sse('locations-stream')
+  locationsStream(): Observable<MessageEvent> {
+    return this.portfolioService.getLocationStream().pipe(
+      map(data => ({ data } as MessageEvent))
+    );
+  }
 
   @Get('socios')
   async getSocios(@Request() req: any, @Query('limit') limit: number, @Query('gestorId') gestorId?: string) {

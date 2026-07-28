@@ -1,12 +1,18 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { SupabaseService } from '../supabase/supabase.service';
+import { Subject, Observable } from 'rxjs';
 import * as XLSX from 'xlsx';
 
 @Injectable()
 export class PortfolioService {
   private readonly logger = new Logger(PortfolioService.name);
+  private readonly locationSubject = new Subject<any>();
 
   constructor(private supabaseService: SupabaseService) {}
+
+  getLocationStream(): Observable<any> {
+    return this.locationSubject.asObservable();
+  }
 
   async getSocios(limit = 50, gestorId?: string) {
     try {
@@ -371,6 +377,7 @@ export class PortfolioService {
   }
 
   async saveGestorLocation(gestorId: string, latitud: number, longitud: number) {
+    const timestamp = new Date().toISOString();
     const { data, error } = await this.supabaseService
       .getClient()
       .from('ubicaciones_gestores')
@@ -378,13 +385,34 @@ export class PortfolioService {
         gestor_id: gestorId,
         latitud,
         longitud,
-        timestamp: new Date().toISOString(),
+        timestamp,
       });
 
     if (error) {
       this.logger.error(`Error saving gestor location: ${error.message}`);
       throw error;
     }
+
+    // Obtener nombre del gestor para enriquecer el evento SSE
+    let gestorName = 'Gestor';
+    try {
+      const { data: gData } = await this.supabaseService
+        .getClient()
+        .from('usuarios_gestor')
+        .select('gestor')
+        .eq('id', gestorId)
+        .limit(1);
+      if (gData && gData[0]?.gestor) gestorName = gData[0].gestor;
+    } catch (e) {}
+
+    this.locationSubject.next({
+      gestor_id: gestorId,
+      latitud: Number(latitud),
+      longitud: Number(longitud),
+      timestamp,
+      gestor_name: gestorName
+    });
+
     return { success: true };
   }
 

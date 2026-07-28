@@ -129,10 +129,71 @@ export default function GestoresMapaPage() {
     };
 
     updateLocations();
-    const interval = setInterval(updateLocations, 30000); // Actualizar cada 30 segundos
+
+    // Conexión Server-Sent Events (SSE) para tiempo real instantáneo
+    let eventSource: EventSource | null = null;
+    try {
+      const apiBase = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
+      const token = typeof window !== 'undefined' ? (localStorage.getItem('auth_token') || '') : '';
+      eventSource = new EventSource(`${apiBase}/portfolio/locations-stream?token=${encodeURIComponent(token)}`);
+
+      eventSource.onmessage = (event) => {
+        try {
+          const loc: GestorLocation = JSON.parse(event.data);
+          if (loc && loc.gestor_id && loc.latitud && loc.longitud) {
+            setLocations(prev => {
+              const filtered = prev.filter(l => l.gestor_id !== loc.gestor_id);
+              return [loc, ...filtered];
+            });
+
+            const existingMarker = markers.current.get(loc.gestor_id);
+            if (existingMarker) {
+              existingMarker.setLngLat([loc.longitud, loc.latitud]);
+            } else if (map.current) {
+              const el = document.createElement('div');
+              el.className = 'marker';
+              el.style.width = '40px';
+              el.style.height = '40px';
+              el.style.borderRadius = '50%';
+              el.style.backgroundColor = '#3b82f6';
+              el.style.border = '3px solid white';
+              el.style.boxShadow = '0 0 15px rgba(59, 130, 246, 0.5)';
+              el.style.display = 'flex';
+              el.style.alignItems = 'center';
+              el.style.justifyContent = 'center';
+              el.style.cursor = 'pointer';
+              el.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>';
+
+              const popup = new mapboxgl.Popup({ offset: 25 })
+                .setHTML(`
+                  <div style="color: #1e293b; padding: 5px;">
+                    <h3 style="font-weight: bold; margin-bottom: 5px;">${loc.gestor_name || 'Gestor'}</h3>
+                    <p style="font-size: 12px; margin: 0;">Última conexión:</p>
+                    <p style="font-size: 12px; color: #64748b;">${new Date(loc.timestamp).toLocaleString()}</p>
+                  </div>
+                `);
+
+              const marker = new mapboxgl.Marker(el)
+                .setLngLat([loc.longitud, loc.latitud])
+                .setPopup(popup)
+                .addTo(map.current!);
+
+              markers.current.set(loc.gestor_id, marker);
+            }
+          }
+        } catch (e) {
+          console.error('Error parsing SSE event:', e);
+        }
+      };
+    } catch (e) {
+      console.error('Error initializing SSE connection:', e);
+    }
+
+    const interval = setInterval(updateLocations, 30000); // Respaldo cada 30s
 
     return () => {
       clearInterval(interval);
+      if (eventSource) eventSource.close();
       map.current?.remove();
     };
   }, []);
@@ -144,6 +205,10 @@ export default function GestoresMapaPage() {
           <h1 className="text-2xl font-bold text-slate-900 flex items-center gap-2">
             <MapPin className="text-blue-500" />
             Geolocalización de Gestores
+            <span className="flex items-center gap-1.5 px-3 py-1 bg-emerald-50 text-emerald-600 border border-emerald-200 text-xs font-semibold rounded-full ml-2">
+              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping" />
+              TRANSMISIÓN EN VIVO
+            </span>
           </h1>
           <p className="text-slate-500">Monitoreo en tiempo real del personal de campo</p>
         </div>
