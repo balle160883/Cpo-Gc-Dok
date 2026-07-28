@@ -12,14 +12,15 @@ export class PortfolioService {
     try {
       // Si hay gestorId, cruzamos asignacion_gestores para filtrar por gestor
       if (gestorId) {
-        const { data: asignaciones } = await this.supabaseService
-          .getClient()
-          .from('asignacion_gestores')
-          .select('NoSOCIO')
-          .eq('GESTOR ASIGNADO', gestorId)
-          .neq('SITUACI\u00d3N DEL CR\u00c9DITO', 'LIQUIDADO');
-
-        const sociosIds = [...new Set((asignaciones || []).map(a => a.NoSOCIO))].filter(Boolean);
+        const asigSql = `
+          SELECT DISTINCT "NoSOCIO"
+          FROM asignacion_gestores
+          WHERE "GESTOR ASIGNADO" = $1
+            AND COALESCE(UPPER("SITUACIÓN DEL CRÉDITO"), '') NOT IN ('LIQUIDADO', 'LIQUIDADA', 'PAGADO', 'PAGADA', 'CANCELADO')
+            AND (COALESCE("SALDO AL DIA", 0) > 0 OR COALESCE("CAPITAL MOROSO", 0) > 0 OR COALESCE("SALDO TOTAL", 0) > 0)
+        `;
+        const asigRes = await this.supabaseService.query(asigSql, [gestorId]);
+        const sociosIds = [...new Set((asigRes.rows || []).map((a: any) => a.NoSOCIO))].filter(Boolean);
         if (sociosIds.length === 0) return [];
 
         // La columna correcta en socios_datos es 'friendly_code', no 'numero_socio'
@@ -129,30 +130,41 @@ export class PortfolioService {
   }
 
   async getAsignaciones(limit = 1000, gestorId?: string) {
-    let query = this.supabaseService
-      .getClient()
-      .from('asignacion_gestores')
-      .select('*');
+    try {
+      const params: any[] = [];
+      const whereClauses: string[] = [];
 
-    if (gestorId) {
-      query = query.eq('GESTOR ASIGNADO', gestorId)
-                   .neq('SITUACIÓN DEL CRÉDITO', 'LIQUIDADO');
-    }
+      if (gestorId) {
+        params.push(gestorId);
+        whereClauses.push(`"GESTOR ASIGNADO" = $${params.length}`);
+      }
 
-    // Para dar soporte a APKs instalados que envían limit=200, forzamos un mínimo de 1000 cuando hay gestorId
-    const numLimit = Number(limit);
-    const effectiveLimit = gestorId ? Math.max(isNaN(numLimit) ? 1000 : numLimit, 1000) : (isNaN(numLimit) ? 1000 : numLimit);
-    query = query.limit(effectiveLimit);
+      // Excluir créditos liquidados, pagados o cancelados
+      whereClauses.push(`COALESCE(UPPER("SITUACIÓN DEL CRÉDITO"), '') NOT IN ('LIQUIDADO', 'LIQUIDADA', 'PAGADO', 'PAGADA', 'CANCELADO')`);
+      
+      // Excluir cuentas que ya no tengan saldo moroso ni saldo al día ni saldo total
+      whereClauses.push(`(COALESCE("SALDO AL DIA", 0) > 0 OR COALESCE("CAPITAL MOROSO", 0) > 0 OR COALESCE("SALDO TOTAL", 0) > 0)`);
 
-    query = query.order('FECHA ASIGNACION', { ascending: false });
+      const whereSql = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
+      
+      const numLimit = Number(limit);
+      const effectiveLimit = gestorId ? Math.max(isNaN(numLimit) ? 1000 : numLimit, 1000) : (isNaN(numLimit) ? 1000 : numLimit);
+      params.push(effectiveLimit);
 
-    const { data, error } = await query;
+      const sql = `
+        SELECT *
+        FROM asignacion_gestores
+        ${whereSql}
+        ORDER BY "FECHA ASIGNACION" DESC
+        LIMIT $${params.length}
+      `;
 
-    if (error) {
+      const result = await this.supabaseService.query(sql, params);
+      return result.rows || [];
+    } catch (error: any) {
       this.logger.error(`Error fetching asignaciones: ${error.message}`);
       throw error;
     }
-    return data;
   }
 
   async getAvales(limit = 1000, gestorId?: string) {
