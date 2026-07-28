@@ -3,7 +3,6 @@
 import { useEffect, useState } from "react";
 import { CreditCard, ArrowUpRight, ArrowDownRight, MoreHorizontal, Loader2, X, Phone, MapPin, User, Calendar, DollarSign, Info } from "lucide-react";
 import { fetchAsignaciones, fetchGestoresLocations, fetchAllGestores } from "@/lib/api";
-import { supabase } from "@/lib/supabase";
 
 export default function CreditosPage() {
   const [asignaciones, setAsignaciones] = useState<any[]>([]);
@@ -41,35 +40,6 @@ export default function CreditosPage() {
     }
     loadData();
   }, [selectedGestor]);
-
-  useEffect(() => {
-    const channel = supabase
-      .channel('asignacion-changes')
-      .on(
-        'postgres_changes',
-        {
-          event: 'UPDATE',
-          schema: 'public',
-          table: 'asignacion_gestores',
-        },
-        (payload) => {
-          setAsignaciones((current) =>
-            current.map((asig) =>
-              asig.NoCUENTA === (payload.new as any).NoCUENTA ? { ...asig, ...payload.new } : asig
-            )
-          );
-          
-          if (selectedAsig && selectedAsig.NoCUENTA === (payload.new as any).NoCUENTA) {
-            setSelectedAsig((prev: any) => ({ ...prev, ...payload.new }));
-          }
-        }
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [selectedAsig]);
 
   const totalCartera = asignaciones.reduce((acc, curr) => acc + (curr['SALDO TOTAL'] || 0), 0);
   const totalVencido = asignaciones.filter(a => a['DIAS MORA'] > 0).reduce((acc, curr) => acc + (curr['SALDO TOTAL'] || 0), 0);
