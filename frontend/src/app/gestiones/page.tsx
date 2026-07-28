@@ -171,14 +171,36 @@ export default function GestionesPage() {
     return rawSujeto;
   };
 
+  // Deduplicación defensiva en el cliente por si existen duplicados históricos en la BD
+  const deduplicatedInteracciones = interacciones.reduce((acc: any[], item: any) => {
+    const itemDesc = (item.descripcion || '').trim().toLowerCase();
+    const itemTime = new Date(item.fecha_gestion).getTime();
+    
+    const isDuplicate = acc.some(existing => {
+      if (String(existing.socio_id).trim() !== String(item.socio_id).trim()) return false;
+      const existingDesc = (existing.descripcion || '').trim().toLowerCase();
+      const diffSeconds = Math.abs(new Date(existing.fecha_gestion).getTime() - itemTime) / 1000;
+      
+      const sameDesc = itemDesc.length > 0 && existingDesc === itemDesc && diffSeconds <= 86400;
+      const sameWindow = diffSeconds <= 900;
+      return sameDesc || sameWindow;
+    });
+
+    if (!isDuplicate) {
+      acc.push(item);
+    }
+    return acc;
+  }, []);
+
   // Filtrar interacciones por tipo y sujeto en el frontend
-  const filteredInteracciones = interacciones.filter(item => {
+  const filteredInteracciones = deduplicatedInteracciones.filter(item => {
     const matchesType = selectedType === 'Todas' || item.tipo_gestion === selectedType;
     const sujetoEfectivo = getSujetoEfectivo(item);
     const matchesSujeto = selectedSujeto === 'Todos' || sujetoEfectivo === selectedSujeto;
     const matchesResultado = selectedResultado === 'Todos' || item.resultado === selectedResultado;
     return matchesType && matchesSujeto && matchesResultado;
   });
+
 
   const getTypeIcon = (type: string) => {
     switch (type) {

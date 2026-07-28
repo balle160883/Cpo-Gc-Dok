@@ -34,12 +34,26 @@ export class CrmService {
 
     for (const item of sorted) {
       const itemTime = new Date(item.fecha_gestion).getTime();
+      const itemSocioNorm = this._normalizeId(item.socio_id);
+      const itemDesc = (item.descripcion || '').trim().toLowerCase();
+
       const duplicateIdx = uniqueData.findIndex(existing => {
-        if (existing.socio_id !== item.socio_id) return false;
-        if (existing.gestor_id !== item.gestor_id) return false;
+        const existingSocioNorm = this._normalizeId(existing.socio_id);
+        if (existingSocioNorm !== itemSocioNorm) return false;
+        
+        // Coincidencia de gestor si ambos tienen id de gestor
+        if (existing.gestor_id && item.gestor_id && existing.gestor_id !== item.gestor_id) return false;
         
         const diffSeconds = Math.abs(new Date(existing.fecha_gestion).getTime() - itemTime) / 1000;
-        return diffSeconds <= 120; // 2 minutes window
+        const existingDesc = (existing.descripcion || '').trim().toLowerCase();
+
+        // 1. Mismo comentario/descripción exacto (no vacío) dentro del mismo día (24h)
+        const sameDescription = itemDesc.length > 0 && existingDesc === itemDesc && diffSeconds <= 86400;
+
+        // 2. Ventana de tiempo cercana (hasta 15 minutos = 900s) para el mismo socio y gestor
+        const withinTimeWindow = diffSeconds <= 900;
+
+        return sameDescription || withinTimeWindow;
       });
 
       if (duplicateIdx !== -1) {
@@ -57,6 +71,7 @@ export class CrmService {
     
     return uniqueData;
   }
+
 
   private async _mapInteraccionesConAsignacion(uniqueData: any[]): Promise<any[]> {
     if (!uniqueData || uniqueData.length === 0) return [];
