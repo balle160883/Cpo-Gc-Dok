@@ -563,6 +563,92 @@ export class CrmService {
       };
     });
   }
+
+  async getExpediente360(socioId: string) {
+    try {
+      const socioIdStr = String(socioId).trim();
+      const socioIdNorm = this._normalizeId(socioIdStr);
+
+      // 1. Obtener datos del socio y asignación
+      const asigSql = `
+        SELECT *
+        FROM asignacion_gestores
+        WHERE "NoSOCIO" = $1 OR "NoSOCIO" = $2 OR "NoCUENTA" = $1
+        LIMIT 1
+      `;
+      const asigRes = await this.supabaseService.query(asigSql, [socioIdStr, socioIdNorm]);
+      const socioInfo = asigRes.rows?.[0] || null;
+
+      // 2. Obtener interacciones (visitas, llamadas, mensajes)
+      const numCuenta = socioInfo?.NoCUENTA || socioIdStr;
+      const intSql = `
+        SELECT *
+        FROM cobranza_interacciones
+        WHERE socio_id::text = $1 OR socio_id::text = $2 OR num_cuenta = $3
+        ORDER BY fecha_gestion DESC
+        LIMIT 200
+      `;
+      const intRes = await this.supabaseService.query(intSql, [socioIdStr, socioIdNorm, numCuenta]);
+      const interacciones = intRes.rows || [];
+
+      // 3. Obtener pagos reales recuperados
+      const pagosSql = `
+        SELECT *
+        FROM pagos_recuperados
+        WHERE numero_socio = $1 OR numero_socio = $2 OR num_credito = $3
+        ORDER BY fecha_real DESC
+        LIMIT 200
+      `;
+      const pagosRes = await this.supabaseService.query(pagosSql, [socioIdStr, socioIdNorm, numCuenta]);
+      const pagos = pagosRes.rows || [];
+
+      // 4. Construir línea del tiempo cronológica combinada
+      const timeline: any[] = [];
+
+      interacciones.forEach((i: any) => {
+        timeline.push({
+          id: i.id,
+          tipo: 'INTERACCION',
+          subtipo: i.tipo_contacto || i.tipo_gestion || 'Visita',
+          resultado: i.resultado || 'Contacto',
+          descripcion: i.descripcion || '',
+          fecha: i.fecha_gestion || i.created_at,
+          gestor: i.gestor_nombre || i.gestor_id || 'Gestor',
+          monto: i.monto_prometido || 0,
+          raw: i
+        });
+      });
+
+      pagos.forEach((p: any) => {
+        timeline.push({
+          id: p.id,
+          tipo: 'PAGO_REAL',
+          subtipo: 'Abono / Pago Realizado',
+          resultado: 'Pago Exitoso',
+          descripcion: p.descripcion || `Abono recuperado de $${Number(p.abono_total || 0).toFixed(2)}`,
+          fecha: p.fecha_real || p.created_at,
+          gestor: 'Sistema / Caja',
+          monto: Number(p.abono_total || 0),
+          raw: p
+        });
+      });
+
+      timeline.sort((a, b) => new Date(b.fecha).getTime() - new Date(a.fecha).getTime());
+
+      return {
+        socio: socioInfo,
+        timeline,
+        resumen: {
+          total_interacciones: interacciones.length,
+          total_pagos: pagos.length,
+          monto_total_pagado: pagos.reduce((sum, p) => sum + (Number(p.abono_total) || 0), 0)
+        }
+      };
+    } catch (error: any) {
+      this.logger.error(`Error building expediente 360: ${error.message}`);
+      return { socio: null, timeline: [], resumen: { total_interacciones: 0, total_pagos: 0, monto_total_pagado: 0 } };
+    }
+  }
 }
 
 

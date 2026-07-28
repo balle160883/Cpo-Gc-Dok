@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { User, Search, Filter, Plus, Loader2, X, Phone, MapPin, MessageSquare, Calendar, History, DollarSign, Clock, CheckCircle2, UserPlus } from "lucide-react";
-import { fetchAsignaciones, fetchAllGestores, registrarInteraccion, fetchInteraccionesSocio, actualizarAsignacion } from "@/lib/api";
+import { fetchAsignaciones, fetchAllGestores, registrarInteraccion, fetchInteraccionesSocio, actualizarAsignacion, fetchExpediente360 } from "@/lib/api";
 import { useRouter } from 'next/navigation';
 
 export default function SociosPage() {
@@ -76,15 +76,22 @@ export default function SociosPage() {
     loadData();
   }, [user, selectedGestor, isAdmin]);
 
+  const [expediente360, setExpediente360] = useState<any>(null);
+  const [activeTab, setActiveTab] = useState<'timeline' | 'avales' | 'credito'>('timeline');
+
   const handleOpenDetail = async (socio: any) => {
     setSelectedSocio(socio);
     setIsDetailModalOpen(true);
     setLoadingHistory(true);
+    setActiveTab('timeline');
     try {
-      const hist = await fetchInteraccionesSocio(socio['NoSOCIO']);
-      setHistory(hist);
+      const expData = await fetchExpediente360(socio['NoSOCIO']);
+      setExpediente360(expData);
+      setHistory(expData?.timeline || []);
     } catch (error) {
-      console.error("Error loading history:", error);
+      console.error("Error loading Expediente 360:", error);
+      // Fallback
+      fetchInteraccionesSocio(socio['NoSOCIO']).then(setHistory).catch(console.error);
     } finally {
       setLoadingHistory(false);
     }
@@ -476,7 +483,7 @@ export default function SociosPage() {
         </div>
       )}
 
-      {/* Modal de Detalle de Socio */}
+      {/* Modal de Detalle de Socio - Expediente 360° */}
       {isDetailModalOpen && selectedSocio && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-50 flex items-end md:items-center justify-center p-0 md:p-4">
           <div className="bg-white rounded-t-3xl md:rounded-3xl shadow-2xl w-full max-w-4xl h-[90vh] md:h-auto md:max-h-[85vh] overflow-hidden flex flex-col animate-in slide-in-from-bottom duration-300">
@@ -486,8 +493,11 @@ export default function SociosPage() {
                   <User size={24} />
                 </div>
                 <div>
-                  <h3 className="font-black text-slate-900 uppercase tracking-tight text-xl">{selectedSocio['NOMBRE']}</h3>
-                  <div className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Socio ID: {selectedSocio['NoSOCIO']}</div>
+                  <div className="flex items-center gap-2">
+                    <h3 className="font-black text-slate-900 uppercase tracking-tight text-xl">{selectedSocio['NOMBRE']}</h3>
+                    <span className="px-2.5 py-0.5 bg-blue-50 text-blue-700 font-extrabold text-[10px] rounded-full border border-blue-100 uppercase">Expediente 360°</span>
+                  </div>
+                  <div className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Socio ID: {selectedSocio['NoSOCIO']} • Cuenta: {selectedSocio['NoCUENTA']}</div>
                 </div>
               </div>
               <button onClick={() => setIsDetailModalOpen(false)} className="w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center text-slate-500 hover:bg-red-50 hover:text-red-500 transition-all">
@@ -495,97 +505,189 @@ export default function SociosPage() {
               </button>
             </div>
 
+            {/* Pestañas de Navegación del Expediente */}
+            <div className="flex border-b border-slate-100 px-6 bg-slate-50/50 gap-2">
+              <button
+                onClick={() => setActiveTab('timeline')}
+                className={`py-3 px-4 text-xs font-black uppercase tracking-tight border-b-2 transition-all flex items-center gap-2 ${activeTab === 'timeline' ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-400 hover:text-slate-600'}`}
+              >
+                <History size={16} /> Línea del Tiempo 360°
+              </button>
+              <button
+                onClick={() => setActiveTab('avales')}
+                className={`py-3 px-4 text-xs font-black uppercase tracking-tight border-b-2 transition-all flex items-center gap-2 ${activeTab === 'avales' ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-400 hover:text-slate-600'}`}
+              >
+                <User size={16} /> Ficha de Avales y Contacto
+              </button>
+              <button
+                onClick={() => setActiveTab('credito')}
+                className={`py-3 px-4 text-xs font-black uppercase tracking-tight border-b-2 transition-all flex items-center gap-2 ${activeTab === 'credito' ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-400 hover:text-slate-600'}`}
+              >
+                <DollarSign size={16} /> Ficha Crediticia
+              </button>
+            </div>
+
             <div className="flex-1 overflow-y-auto p-6 md:p-8">
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-                <div className="p-5 bg-slate-50 rounded-2xl border border-slate-100 shadow-sm">
-                  <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3 flex items-center gap-2">
-                    <DollarSign size={14} className="text-emerald-500" /> Saldo y Cartera
+              {/* Tarjetas resumen superior */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100 shadow-sm">
+                  <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1 flex items-center gap-2">
+                    <DollarSign size={14} className="text-emerald-500" /> Saldo Total
                   </div>
-                  <div className="space-y-3">
-                    <div className="flex justify-between items-end">
-                      <span className="text-xs text-slate-500 font-bold">Saldo Total:</span>
-                      <span className="text-lg font-black text-slate-900">${selectedSocio['SALDO TOTAL']?.toLocaleString()}</span>
-                    </div>
-                    <div className="flex justify-between items-end">
-                      <span className="text-xs text-slate-500 font-bold">Capital Moroso:</span>
-                      <span className="text-sm font-bold text-red-600">${selectedSocio['CAPITAL MOROSO']?.toLocaleString()}</span>
-                    </div>
-                  </div>
+                  <div className="text-xl font-black text-slate-900">${selectedSocio['SALDO TOTAL']?.toLocaleString() || '0.00'}</div>
                 </div>
 
-                <div className="p-5 bg-slate-50 rounded-2xl border border-slate-100 shadow-sm">
-                  <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3 flex items-center gap-2">
-                    <Clock size={14} className="text-orange-500" /> Estado de Mora
+                <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100 shadow-sm">
+                  <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1 flex items-center gap-2">
+                    <Clock size={14} className="text-red-500" /> Capital Moroso / Días
                   </div>
-                  <div className="space-y-3">
-                    <div className="flex justify-between items-end">
-                      <span className="text-xs text-slate-500 font-bold">Días en Mora:</span>
-                      <span className="text-lg font-black text-red-600">{selectedSocio['DIAS MORA']} d</span>
-                    </div>
-                    <div className="flex justify-between items-center">
-                      <span className="text-xs text-slate-500 font-bold">Situación:</span>
-                      <span className="px-2 py-0.5 bg-white border border-slate-200 rounded-md text-[9px] font-black uppercase text-slate-700">{selectedSocio['SITUACIÓN DEL CRÉDITO']}</span>
-                    </div>
-                  </div>
+                  <div className="text-xl font-black text-red-600">${selectedSocio['CAPITAL MOROSO']?.toLocaleString() || '0.00'} <span className="text-xs font-bold text-slate-400">({selectedSocio['DIAS MORA'] || 0}d)</span></div>
                 </div>
 
-                <div className="p-5 bg-slate-50 rounded-2xl border border-slate-100 shadow-sm">
-                  <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3 flex items-center gap-2">
-                    <User size={14} className="text-blue-500" /> Asignación
+                <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100 shadow-sm">
+                  <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1 flex items-center gap-2">
+                    <User size={14} className="text-blue-500" /> Gestor Asignado
                   </div>
-                  <div className="space-y-3">
-                    <div className="flex justify-between items-end">
-                      <span className="text-xs text-slate-500 font-bold">Gestor:</span>
-                      <span className="text-sm font-bold text-slate-900">{selectedSocio['GESTOR ASIGNADO']}</span>
-                    </div>
-                    <div className="flex justify-between items-end">
-                      <span className="text-xs text-slate-500 font-bold">Cuenta:</span>
-                      <span className="text-sm font-bold text-slate-600 font-mono">{selectedSocio['NoCUENTA']}</span>
-                    </div>
-                  </div>
+                  <div className="text-sm font-black text-slate-800">{selectedSocio['GESTOR ASIGNADO'] || 'Sin Asignar'}</div>
                 </div>
               </div>
 
-              <div className="space-y-4">
-                <h4 className="font-black text-slate-900 uppercase tracking-tight flex items-center gap-2 text-sm">
-                  <History size={18} className="text-blue-600" />
-                  Historial de Gestiones Recientes
-                </h4>
-                
-                {loadingHistory ? (
-                   <div className="flex items-center gap-2 text-slate-400 py-10 justify-center">
-                     <Loader2 className="animate-spin" size={20} />
-                     <span className="text-xs font-bold uppercase">Cargando historial...</span>
-                   </div>
-                ) : history.length === 0 ? (
-                   <div className="p-8 text-center bg-slate-50 rounded-2xl border border-dashed border-slate-200">
-                     <p className="text-xs font-bold text-slate-400 uppercase">No hay gestiones registradas para este socio.</p>
-                   </div>
-                ) : (
-                  <div className="space-y-3">
-                    {history.map((h, i) => (
-                      <div key={i} className="p-4 bg-white border border-slate-100 rounded-2xl shadow-sm hover:border-blue-200 transition-all">
-                        <div className="flex justify-between items-start mb-2">
-                          <div className="flex items-center gap-2">
-                            <div className="p-1.5 bg-blue-50 text-blue-600 rounded-lg">
-                              {h.tipo_gestion === 'Visita' ? <MapPin size={14} /> : h.tipo_gestion === 'Llamada' ? <Phone size={14} /> : <MessageSquare size={14} />}
+              {/* Contenido según Pestaña Activa */}
+              {activeTab === 'timeline' && (
+                <div className="space-y-4">
+                  <h4 className="font-black text-slate-900 uppercase tracking-tight flex items-center gap-2 text-sm mb-4">
+                    <History size={18} className="text-blue-600" />
+                    Historial Cronológico de Interacciones y Cobros
+                  </h4>
+                  
+                  {loadingHistory ? (
+                     <div className="flex items-center gap-2 text-slate-400 py-10 justify-center">
+                       <Loader2 className="animate-spin" size={20} />
+                       <span className="text-xs font-bold uppercase">Cargando expediente 360...</span>
+                     </div>
+                  ) : history.length === 0 ? (
+                     <div className="p-8 text-center bg-slate-50 rounded-2xl border border-dashed border-slate-200">
+                       <p className="text-xs font-bold text-slate-400 uppercase">No hay interacciones registradas para este socio.</p>
+                     </div>
+                  ) : (
+                    <div className="relative pl-6 border-l-2 border-slate-200 space-y-6">
+                      {history.map((h: any, i: number) => {
+                        const isPagoReal = h.tipo === 'PAGO_REAL' || h.tipo_gestion === 'Pago Real';
+                        return (
+                          <div key={i} className="relative group">
+                            {/* Nodo de la línea del tiempo */}
+                            <div className={`absolute -left-[31px] top-1 w-4 h-4 rounded-full border-2 border-white shadow-sm flex items-center justify-center ${isPagoReal ? 'bg-emerald-500' : 'bg-blue-600'}`} />
+                            
+                            <div className="p-4 bg-white border border-slate-100 rounded-2xl shadow-sm hover:border-blue-200 transition-all">
+                              <div className="flex justify-between items-start mb-2">
+                                <div className="flex items-center gap-2">
+                                  <div className={`p-1.5 rounded-lg ${isPagoReal ? 'bg-emerald-50 text-emerald-600' : 'bg-blue-50 text-blue-600'}`}>
+                                    {isPagoReal ? <DollarSign size={14} /> : (h.subtipo === 'Visita' || h.tipo_gestion === 'Visita' ? <MapPin size={14} /> : <Phone size={14} />)}
+                                  </div>
+                                  <span className="text-xs font-black text-slate-900 uppercase tracking-tight">{h.subtipo || h.tipo_gestion || 'Gestión'}</span>
+                                </div>
+                                <span className="text-[10px] font-bold text-slate-400">{h.fecha ? new Date(h.fecha).toLocaleString() : 'Reciente'}</span>
+                              </div>
+
+                              <p className="text-sm text-slate-700 font-medium italic mb-3 leading-relaxed">"{h.descripcion}"</p>
+
+                              <div className="flex items-center gap-3 border-t border-slate-50 pt-3">
+                                <div className={`flex items-center gap-1 text-[9px] font-black uppercase px-2 py-0.5 rounded-md ${isPagoReal ? 'bg-emerald-50 text-emerald-700 border border-emerald-100' : 'bg-blue-50 text-blue-700 border border-blue-100'}`}>
+                                  <CheckCircle2 size={10} /> {h.resultado || 'Registrado'}
+                                </div>
+                                {h.monto > 0 && (
+                                  <div className="text-xs font-black text-emerald-600 bg-emerald-50/50 px-2 py-0.5 rounded-md border border-emerald-100">
+                                    Monto: ${Number(h.monto).toLocaleString()}
+                                  </div>
+                                )}
+                                <div className="text-[9px] text-slate-400 font-bold uppercase ml-auto">Gestor: {h.gestor || h.gestor_nombre || 'Sistema'}</div>
+                              </div>
                             </div>
-                            <span className="text-xs font-black text-slate-900 uppercase tracking-tight">{h.tipo_gestion} de Cobranza</span>
                           </div>
-                          <span className="text-[10px] font-bold text-slate-400">{new Date(h.fecha_gestion).toLocaleString()}</span>
-                        </div>
-                        <p className="text-sm text-slate-600 italic mb-3 leading-relaxed">"{h.descripcion}"</p>
-                        <div className="flex items-center gap-3 border-t border-slate-50 pt-3">
-                          <div className="flex items-center gap-1 text-[9px] font-black text-emerald-600 uppercase bg-emerald-50 px-2 py-0.5 rounded-md">
-                            <CheckCircle2 size={10} /> {h.resultado}
-                          </div>
-                          <div className="text-[9px] text-slate-400 font-bold uppercase ml-auto">Gestor: {h.gestor_nombre || 'Sistema'}</div>
-                        </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {activeTab === 'avales' && (
+                <div className="space-y-6">
+                  <div className="p-5 bg-white border border-slate-100 rounded-2xl shadow-sm">
+                    <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-3 flex items-center gap-2">
+                      <MapPin size={14} className="text-blue-500" /> Domicilio y Contacto del Socio Titular
+                    </h4>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
+                      <div>
+                        <span className="text-xs text-slate-400 font-bold block">Domicilio Principal:</span>
+                        <span className="font-bold text-slate-800">{selectedSocio['DOMICILIO'] || 'No especificado'}</span>
                       </div>
-                    ))}
+                      <div>
+                        <span className="text-xs text-slate-400 font-bold block">Cruces / Referencia:</span>
+                        <span className="font-bold text-slate-800">{selectedSocio['CRUCES'] || 'Sin referencias'}</span>
+                      </div>
+                      <div>
+                        <span className="text-xs text-slate-400 font-bold block">Colonia / Municipio:</span>
+                        <span className="font-bold text-slate-800">{selectedSocio['COLONIA'] || ''} {selectedSocio['MUNICIPIO'] ? `, ${selectedSocio['MUNICIPIO']}` : ''}</span>
+                      </div>
+                      <div>
+                        <span className="text-xs text-slate-400 font-bold block">Teléfonos:</span>
+                        <span className="font-bold text-blue-600 font-mono">{selectedSocio['TELEFONOS'] || 'Sin teléfono registrado'}</span>
+                      </div>
+                    </div>
                   </div>
-                )}
-              </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div className="p-5 bg-blue-50/50 border border-blue-100 rounded-2xl">
+                      <h4 className="text-xs font-black text-blue-600 uppercase tracking-widest mb-3 flex items-center gap-2">
+                        <User size={14} /> Aval 1 (Garantía)
+                      </h4>
+                      <div className="space-y-2 text-sm">
+                        <div className="font-black text-slate-900">{selectedSocio['NOMBRE D.A.1'] || selectedSocio['AVAL 1'] || 'Sin Aval 1 Registrado'}</div>
+                        <div className="text-xs text-slate-600"><strong>Domicilio:</strong> {selectedSocio['DOMICILIO D.A.1'] || 'Sin domicilio'}</div>
+                        <div className="text-xs text-slate-600 font-mono"><strong>Teléfono:</strong> {selectedSocio['TELÉFONOS D.A.1'] || 'Sin teléfono'}</div>
+                      </div>
+                    </div>
+
+                    <div className="p-5 bg-purple-50/50 border border-purple-100 rounded-2xl">
+                      <h4 className="text-xs font-black text-purple-600 uppercase tracking-widest mb-3 flex items-center gap-2">
+                        <User size={14} /> Aval 2 (Garantía Secundaria)
+                      </h4>
+                      <div className="space-y-2 text-sm">
+                        <div className="font-black text-slate-900">{selectedSocio['NOMBRE D.A.2'] || selectedSocio['AVAL 2'] || 'Sin Aval 2 Registrado'}</div>
+                        <div className="text-xs text-slate-600"><strong>Domicilio:</strong> {selectedSocio['DOMICILIO D.A.2'] || 'Sin domicilio'}</div>
+                        <div className="text-xs text-slate-600 font-mono"><strong>Teléfono:</strong> {selectedSocio['TELÉFONOS D.A.2'] || 'Sin teléfono'}</div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {activeTab === 'credito' && (
+                <div className="p-5 bg-white border border-slate-100 rounded-2xl shadow-sm space-y-4">
+                  <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-3 flex items-center gap-2">
+                    <DollarSign size={14} className="text-emerald-500" /> Ficha de Crédito y Plan de Pagos
+                  </h4>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                    <div className="p-3 bg-slate-50 rounded-xl">
+                      <span className="text-[10px] font-bold text-slate-400 uppercase block">Producto</span>
+                      <span className="font-black text-slate-900">{selectedSocio['Producto'] || 'Préstamo'}</span>
+                    </div>
+                    <div className="p-3 bg-slate-50 rounded-xl">
+                      <span className="text-[10px] font-bold text-slate-400 uppercase block">Monto Aprobado</span>
+                      <span className="font-black text-slate-900">${selectedSocio['MONTO APROBADO']?.toLocaleString() || '0.00'}</span>
+                    </div>
+                    <div className="p-3 bg-slate-50 rounded-xl">
+                      <span className="text-[10px] font-bold text-slate-400 uppercase block">Frecuencia Pagos</span>
+                      <span className="font-black text-slate-900">{selectedSocio['FRECUENCIA PAGOS'] || 'Semanal'}</span>
+                    </div>
+                    <div className="p-3 bg-slate-50 rounded-xl">
+                      <span className="text-[10px] font-bold text-slate-400 uppercase block">Cuotas Atrasadas</span>
+                      <span className="font-black text-red-600">{selectedSocio['CUOTAS ATRASADAS'] || 0} cuotas</span>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
             
             <div className="p-6 bg-slate-50 border-t border-slate-100 flex gap-4 sticky bottom-0">

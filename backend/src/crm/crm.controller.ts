@@ -26,6 +26,11 @@ export class CrmController {
     return this.crmService.getInteraccionesSocio(Number(id));
   }
 
+  @Get('socio/:socioId/expediente360')
+  async getExpediente360(@Param('socioId') socioId: string) {
+    return this.crmService.getExpediente360(socioId);
+  }
+
   @Get('interacciones')
   async getInteracciones(
     @Request() req: any, 

@@ -210,3 +210,10 @@ export async function importAvales(file: File) {
   
   return res.json();
 }
+
+export async function fetchExpediente360(socioId: string): Promise<any> {
+  const headers = getAuthHeader();
+  const response = await fetch(`${API_URL}/crm/socio/${encodeURIComponent(socioId)}/expediente360`, { headers });
+  if (!response.ok) throw new Error("Failed to fetch Expediente 360");
+  return response.json();
+}
