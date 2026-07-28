@@ -179,23 +179,6 @@ export default function PromesasPage() {
         ))}
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div className="card text-center p-4 border-blue-100 bg-blue-50/30">
-          <div className="text-slate-400 text-[10px] uppercase font-bold mb-1 tracking-wider">Promesas Pendientes</div>
-          <div className="text-3xl font-black text-slate-900">{promesas.length}</div>
-          <div className="text-blue-600 text-xs font-bold mt-1">${totalMonto.toLocaleString()}</div>
-        </div>
-        <div className="card text-center p-4 border-red-100 bg-red-50/30">
-          <div className="text-slate-400 text-[10px] uppercase font-bold mb-1 tracking-wider">Vencidas Hoy</div>
-          <div className="text-3xl font-black text-red-600">{totalVencidas}</div>
-          <div className="text-red-400 text-xs font-bold mt-1">Requiere atención</div>
-        </div>
-        <div className="card text-center p-4 border-emerald-100 bg-emerald-50/30">
-          <div className="text-slate-400 text-[10px] uppercase font-bold mb-1 tracking-wider">Efectividad Global</div>
-          <div className="text-3xl font-black text-emerald-600">--</div>
-          <div className="text-emerald-500 text-xs font-bold mt-1">Sincronizado</div>
-        </div>
-      </div>
 
       {/* Vista Calendario Grid Mensual */}
       {viewMode === 'calendar' ? (
