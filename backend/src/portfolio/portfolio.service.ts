@@ -375,10 +375,18 @@ export class PortfolioService {
   }
 
   async updateAsignacion(noCuenta: string, data: any) {
+    const payload: any = { ...data };
+
+    // Si la app móvil envía 'situacion', mapearla a la columna real de BD 'SITUACIÓN DEL CRÉDITO'
+    if (payload.situacion !== undefined) {
+      payload['SITUACIÓN DEL CRÉDITO'] = payload.situacion;
+      delete payload.situacion;
+    }
+
     const { data: result, error } = await this.supabaseService
       .getClient()
       .from('asignacion_gestores')
-      .update(data)
+      .update(payload)
       .eq('NoCUENTA', noCuenta)
       .select();
 
