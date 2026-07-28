@@ -511,10 +511,11 @@ export class CrmService {
     const dedupedList = Array.from(uniqueBySocio.values());
 
     // =====================================================================
-    // 2. Enriquecer con nombre de socio desde asignacion_gestores
+    // 2. Enriquecer con nombre de socio y verificar pagos recuperados
     // =====================================================================
     const uniqueSocioIds = [...new Set(dedupedList.map(i => i.socio_id).filter(Boolean))];
     let avalesMap: Map<string, any> = new Map();
+    let pagosSet: Set<string> = new Set();
 
     if (uniqueSocioIds.length > 0) {
       const avalesData = await this._fetchInBatches(
@@ -522,16 +523,35 @@ export class CrmService {
         'NoSOCIO, NoCUENTA, NOMBRE, "NOMBRE D.A.1", "NOMBRE D.A.2", "FECHA ASIGNACION"'
       );
       avalesData.forEach((a: any) => avalesMap.set(String(a.NoSOCIO).trim(), a));
+
+      // Buscar pagos reales recuperados
+      try {
+        const pagosSql = `
+          SELECT DISTINCT numero_socio, num_credito
+          FROM pagos_recuperados
+          WHERE numero_socio ANY($1) OR num_credito ANY($1)
+        `;
+        const pagosRes = await this.supabaseService.query(pagosSql, [uniqueSocioIds]);
+        (pagosRes.rows || []).forEach((p: any) => {
+          if (p.numero_socio) pagosSet.add(String(p.numero_socio).trim());
+          if (p.num_credito) pagosSet.add(String(p.num_credito).trim());
+        });
+      } catch (e) {
+        this.logger.warn('No se pudo verificar pagos recuperados para promesas');
+      }
     }
 
+    const todayStr = new Date().toISOString().split('T')[0];
+
     // =====================================================================
-    // 3. Mapear respuesta
+    // 3. Mapear respuesta con Semáforo de Estado
     // =====================================================================
     return dedupedList.map(i => {
       const sujetoEfectivo = this._getSujetoEfectivo(i);
       const isAval = sujetoEfectivo.startsWith('Aval');
       const iStr = String(i.socio_id || '').trim();
       const asig = avalesMap.get(iStr) || null;
+      const numCuenta = i.num_cuenta || asig?.NoCUENTA || '';
 
       const socioName = asig?.NOMBRE || '';
       let avalName = null;
@@ -541,13 +561,29 @@ export class CrmService {
 
       const montoNum = Number(i.monto_prometido || 0) || this._extractMonto(i.descripcion);
 
+      const fechaPromesa = i.fecha_promesa || i.fecha_gestion;
+      const promesaDateStr = fechaPromesa ? new Date(fechaPromesa).toISOString().split('T')[0] : '';
+
+      // Determinar Semáforo
+      let semaforo = 'pendiente';
+      const isPaid = pagosSet.has(iStr) || (numCuenta && pagosSet.has(numCuenta));
+
+      if (isPaid || i.estado === 'cumplida') {
+        semaforo = 'cumplida';
+      } else if (promesaDateStr === todayStr) {
+        semaforo = 'hoy';
+      } else if (promesaDateStr && promesaDateStr < todayStr) {
+        semaforo = 'vencida';
+      }
+
       return {
         id: i.id,
         is_informal: !i.promesa_id,
-        num_cuenta: i.num_cuenta || asig?.NoCUENTA || 'Bitácora',
+        num_cuenta: numCuenta || 'Bitácora',
         monto: montoNum,
-        fecha_pago: i.fecha_promesa || i.fecha_gestion,
-        estado: i.estado || 'pendiente',
+        fecha_pago: fechaPromesa,
+        estado: semaforo,
+        semaforo: semaforo,
         descripcion: i.descripcion,
         gestor_id: i.gestor_id,
         gestor_nombre: i.gestor_nombre,
