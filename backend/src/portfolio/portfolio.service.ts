@@ -136,14 +136,35 @@ export class PortfolioService {
 
       if (gestorId) {
         params.push(gestorId);
-        whereClauses.push(`"GESTOR ASIGNADO" = $${params.length}`);
+        whereClauses.push(`ag."GESTOR ASIGNADO" = $${params.length}`);
       }
 
-      // Excluir créditos liquidados, pagados o cancelados
-      whereClauses.push(`COALESCE(UPPER("SITUACIÓN DEL CRÉDITO"), '') NOT IN ('LIQUIDADO', 'LIQUIDADA', 'PAGADO', 'PAGADA', 'CANCELADO')`);
+      // 1. Excluir créditos liquidados, pagados o cancelados en asignacion_gestores
+      whereClauses.push(`COALESCE(UPPER(ag."SITUACIÓN DEL CRÉDITO"), '') NOT IN ('LIQUIDADO', 'LIQUIDADA', 'PAGADO', 'PAGADA', 'CANCELADO')`);
       
-      // Excluir cuentas que ya no tengan saldo moroso ni saldo al día ni saldo total
-      whereClauses.push(`(COALESCE("SALDO AL DIA", 0) > 0 OR COALESCE("CAPITAL MOROSO", 0) > 0 OR COALESCE("SALDO TOTAL", 0) > 0)`);
+      // 2. Excluir cuentas que ya no tengan saldo moroso ni saldo al día ni saldo total
+      whereClauses.push(`(COALESCE(ag."SALDO AL DIA", 0) > 0 OR COALESCE(ag."CAPITAL MOROSO", 0) > 0 OR COALESCE(ag."SALDO TOTAL", 0) > 0)`);
+
+      // 3. Excluir si en la tabla prestamos_datos el crédito ya figura como LIQUIDADO/PAGADO o sin mora/saldo
+      whereClauses.push(`NOT EXISTS (
+        SELECT 1 FROM prestamos_datos pd
+        WHERE (pd.num_cuenta = ag."NoCUENTA" OR pd.socio_id::text = ag."NoSOCIO")
+          AND (
+            COALESCE(UPPER(pd.estado), '') IN ('LIQUIDADO', 'LIQUIDADA', 'PAGADO', 'PAGADA', 'CANCELADO')
+            OR (COALESCE(pd.saldo_mora, 0) <= 0 AND COALESCE(pd.saldo_total, 0) <= 0)
+          )
+      )`);
+
+      // 4. Excluir si existe un registro de pago en pagos_recuperados que liquida o cubre el abono
+      whereClauses.push(`NOT EXISTS (
+        SELECT 1 FROM pagos_recuperados pr
+        WHERE (pr.num_credito = ag."NoCUENTA" OR pr.numero_socio = ag."NoSOCIO")
+          AND (
+            COALESCE(UPPER(pr.descripcion), '') LIKE '%LIQUID%'
+            OR COALESCE(UPPER(pr.descripcion), '') LIKE '%PAGO TOTAL%'
+            OR COALESCE(pr.abono_total, 0) >= COALESCE(ag."SALDO TOTAL", ag."SALDO AL DIA", 1)
+          )
+      )`);
 
       const whereSql = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
       
@@ -152,10 +173,10 @@ export class PortfolioService {
       params.push(effectiveLimit);
 
       const sql = `
-        SELECT *
-        FROM asignacion_gestores
+        SELECT ag.*
+        FROM asignacion_gestores ag
         ${whereSql}
-        ORDER BY "FECHA ASIGNACION" DESC
+        ORDER BY ag."FECHA ASIGNACION" DESC
         LIMIT $${params.length}
       `;
 
