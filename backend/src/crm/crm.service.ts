@@ -372,8 +372,8 @@ export class CrmService {
         hasMore = false;
       }
 
-      // Seguridad: No recuperar más de 5,000 en un solo reporte para evitar timeout del backend
-      if (allData.length >= 5000) {
+      // Seguridad: No recuperar más de 50,000 en un solo reporte para evitar timeout del backend
+      if (allData.length >= 50000) {
         hasMore = false;
       }
     }
