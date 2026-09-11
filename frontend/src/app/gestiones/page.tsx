@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { MessageSquare, Calendar, Phone, MapPin, CheckCircle2, Loader2, User, FileDown, Plus, X } from "lucide-react";
+import { MessageSquare, Calendar, Phone, MapPin, CheckCircle2, Loader2, User, FileDown, Plus, X, ChevronLeft, ChevronRight, CalendarDays } from "lucide-react";
 import { fetchInteracciones, fetchAllGestores, registrarInteraccion, fetchAsignaciones } from "@/lib/api";
 import * as XLSX from 'xlsx';
 
@@ -15,10 +15,27 @@ export default function GestionesPage() {
   const [gestores, setGestores] = useState<any[]>([]);
   const [selectedGestor, setSelectedGestor] = useState<string>("");
   const [selectedType, setSelectedType] = useState<GestionType>('Todas');
+  
+  // Modo de visualización: 'dia' (por día, ultra rápido) o 'rango' (periodo personalizado)
+  const [viewMode, setViewMode] = useState<'dia' | 'rango'>('dia');
+  
+  const getTodayStr = () => {
+    const d = new Date();
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
+
+  const [currentDay, setCurrentDay] = useState<string>(getTodayStr());
   const [startDate, setStartDate] = useState<string>("");
   const [endDate, setEndDate] = useState<string>("");
   const [selectedSujeto, setSelectedSujeto] = useState<'Todos' | 'Socio' | 'Aval'>('Todos');
   const [selectedResultado, setSelectedResultado] = useState<string>("Todos");
+
+  // Paginación interna de la tabla/timeline
+  const [currentPage, setCurrentPage] = useState<number>(1);
+  const itemsPerPage = 25;
 
   // Estados para Registro de Gestión (Llamada/Mensaje)
   const [isGestionModalOpen, setIsGestionModalOpen] = useState(false);
@@ -114,8 +131,11 @@ export default function GestionesPage() {
     async function loadData() {
       setLoading(true);
       try {
-        const data = await fetchInteracciones(selectedGestor, startDate, endDate);
+        const effectiveStart = viewMode === 'dia' ? currentDay : startDate;
+        const effectiveEnd = viewMode === 'dia' ? currentDay : endDate;
+        const data = await fetchInteracciones(selectedGestor, effectiveStart, effectiveEnd);
         setInteracciones(data);
+        setCurrentPage(1);
       } catch (error) {
         console.error("Error loading interactions:", error);
       } finally {
@@ -123,7 +143,30 @@ export default function GestionesPage() {
       }
     }
     loadData();
-  }, [selectedGestor, startDate, endDate]);
+  }, [selectedGestor, viewMode, currentDay, startDate, endDate]);
+
+  const handlePrevDay = () => {
+    const parts = currentDay.split('-').map(Number);
+    const d = new Date(parts[0], parts[1] - 1, parts[2]);
+    d.setDate(d.getDate() - 1);
+    const prev = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    setCurrentDay(prev);
+    setCurrentPage(1);
+  };
+
+  const handleNextDay = () => {
+    const parts = currentDay.split('-').map(Number);
+    const d = new Date(parts[0], parts[1] - 1, parts[2]);
+    d.setDate(d.getDate() + 1);
+    const next = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    setCurrentDay(next);
+    setCurrentPage(1);
+  };
+
+  const handleToday = () => {
+    setCurrentDay(getTodayStr());
+    setCurrentPage(1);
+  };
 
   const safeFormatDate = (dateStr: any, isDateTime = false, fallback = 'N/A') => {
     if (!dateStr) return fallback;
@@ -133,6 +176,7 @@ export default function GestionesPage() {
   };
 
   const handleExportExcel = () => {
+    if (!filteredInteracciones || filteredInteracciones.length === 0) return;
     const dataToExport = filteredInteracciones.map(item => {
       const sujetoExcel = getSujetoEfectivo(item);
       const esAvalExcel = sujetoExcel.startsWith('Aval');
@@ -157,7 +201,8 @@ export default function GestionesPage() {
     XLSX.utils.book_append_sheet(workbook, worksheet, "Gestiones");
     
     // Generar nombre de archivo con fecha
-    const fileName = `Gestiones_${new Date().toISOString().split('T')[0]}.xlsx`;
+    const fileSuffix = viewMode === 'dia' ? currentDay : `${startDate || 'Inicio'}_al_${endDate || 'Fin'}`;
+    const fileName = `Gestiones_${fileSuffix}_${new Date().toISOString().split('T')[0]}.xlsx`;
     XLSX.writeFile(workbook, fileName);
   };
 
@@ -180,6 +225,13 @@ export default function GestionesPage() {
     return matchesType && matchesSujeto && matchesResultado;
   });
 
+  // Paginación interna
+  const totalPages = Math.max(1, Math.ceil(filteredInteracciones.length / itemsPerPage));
+  const paginatedInteracciones = filteredInteracciones.slice(
+    (currentPage - 1) * itemsPerPage,
+    currentPage * itemsPerPage
+  );
+
   const getTypeIcon = (type: string) => {
     switch (type) {
       case 'Llamada': return <Phone size={18} />;
@@ -198,38 +250,92 @@ export default function GestionesPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex justify-between items-center">
+      <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4">
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Historial de Gestiones</h1>
-          <p className="text-slate-500 text-sm">Registro cronológico de actividades de cobranza y contacto.</p>
+          <p className="text-slate-500 text-sm">Registro cronológico de actividades de cobranza y contacto en campo.</p>
         </div>
         
-        <div className="flex flex-wrap items-center gap-3">
-          <div className="flex items-center gap-2 bg-white p-2 rounded-xl border border-slate-200 shadow-sm">
-            <span className="text-[10px] font-bold text-slate-400 uppercase ml-2">Inicio:</span>
-            <input 
-              type="date" 
-              value={startDate}
-              onChange={(e) => setStartDate(e.target.value)}
-              className="text-xs font-bold text-slate-700 focus:outline-none bg-transparent cursor-pointer"
-            />
+        <div className="flex flex-wrap items-center gap-3 w-full lg:w-auto">
+          {/* Selector de Modo: Día a Día vs Rango Personalizado */}
+          <div className="flex items-center bg-slate-100 p-1 rounded-xl border border-slate-200">
+            <button
+              onClick={() => { setViewMode('dia'); setCurrentPage(1); }}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                viewMode === 'dia' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500 hover:text-slate-800'
+              }`}
+            >
+              Por Día
+            </button>
+            <button
+              onClick={() => { setViewMode('rango'); setCurrentPage(1); }}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                viewMode === 'rango' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500 hover:text-slate-800'
+              }`}
+            >
+              Rango / Mes
+            </button>
           </div>
-          <div className="flex items-center gap-2 bg-white p-2 rounded-xl border border-slate-200 shadow-sm">
-            <span className="text-[10px] font-bold text-slate-400 uppercase ml-2">Fin:</span>
-            <input 
-              type="date" 
-              value={endDate}
-              onChange={(e) => setEndDate(e.target.value)}
-              className="text-xs font-bold text-slate-700 focus:outline-none bg-transparent cursor-pointer"
-            />
-          </div>
+
+          {/* Navegación Por Día */}
+          {viewMode === 'dia' ? (
+            <div className="flex items-center gap-1 bg-white p-1.5 rounded-xl border border-slate-200 shadow-sm">
+              <button 
+                onClick={handlePrevDay} 
+                title="Día anterior"
+                className="p-1 hover:bg-slate-100 rounded-lg text-slate-600 transition-colors"
+              >
+                <ChevronLeft size={18} />
+              </button>
+              <input 
+                type="date" 
+                value={currentDay}
+                onChange={(e) => { setCurrentDay(e.target.value); setCurrentPage(1); }}
+                className="text-xs font-extrabold text-slate-800 focus:outline-none bg-transparent cursor-pointer px-2"
+              />
+              <button 
+                onClick={handleNextDay} 
+                title="Día siguiente"
+                className="p-1 hover:bg-slate-100 rounded-lg text-slate-600 transition-colors"
+              >
+                <ChevronRight size={18} />
+              </button>
+              <button 
+                onClick={handleToday}
+                className="text-[10px] font-black uppercase tracking-wider bg-blue-50 text-blue-600 px-2.5 py-1 rounded-lg hover:bg-blue-100 transition-colors ml-1"
+              >
+                Hoy
+              </button>
+            </div>
+          ) : (
+            <div className="flex items-center gap-2">
+              <div className="flex items-center gap-1 bg-white p-2 rounded-xl border border-slate-200 shadow-sm">
+                <span className="text-[10px] font-bold text-slate-400 uppercase ml-1">Inicio:</span>
+                <input 
+                  type="date" 
+                  value={startDate}
+                  onChange={(e) => { setStartDate(e.target.value); setCurrentPage(1); }}
+                  className="text-xs font-bold text-slate-700 focus:outline-none bg-transparent cursor-pointer"
+                />
+              </div>
+              <div className="flex items-center gap-1 bg-white p-2 rounded-xl border border-slate-200 shadow-sm">
+                <span className="text-[10px] font-bold text-slate-400 uppercase ml-1">Fin:</span>
+                <input 
+                  type="date" 
+                  value={endDate}
+                  onChange={(e) => { setEndDate(e.target.value)} }
+                  className="text-xs font-bold text-slate-700 focus:outline-none bg-transparent cursor-pointer"
+                />
+              </div>
+            </div>
+          )}
           
           {isAdmin && (
             <div className="flex items-center gap-2 bg-white p-2 rounded-xl border border-slate-200 shadow-sm">
               <span className="text-[10px] font-bold text-slate-400 uppercase ml-2">Gestor:</span>
               <select 
                 value={selectedGestor}
-                onChange={(e) => setSelectedGestor(e.target.value)}
+                onChange={(e) => { setSelectedGestor(e.target.value); setCurrentPage(1); }}
                 className="text-xs font-bold text-slate-700 focus:outline-none bg-transparent cursor-pointer"
               >
                 <option value="">Todos</option>
@@ -244,7 +350,7 @@ export default function GestionesPage() {
             <span className="text-[10px] font-bold text-slate-400 uppercase ml-2">Resultado:</span>
             <select 
               value={selectedResultado}
-              onChange={(e) => setSelectedResultado(e.target.value)}
+              onChange={(e) => { setSelectedResultado(e.target.value); setCurrentPage(1); }}
               className="text-xs font-bold text-slate-700 focus:outline-none bg-transparent cursor-pointer"
             >
               <option value="Todos">Todos</option>
@@ -271,9 +377,10 @@ export default function GestionesPage() {
             onClick={handleExportExcel}
             className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2.5 rounded-xl text-xs font-bold transition-all shadow-sm hover:shadow-md disabled:opacity-50"
             disabled={filteredInteracciones.length === 0}
+            title="Exportar todas las gestiones filtradas a Excel"
           >
             <FileDown size={16} />
-            Exportar Excel
+            Exportar Excel ({filteredInteracciones.length})
           </button>
         </div>
       </div>
@@ -321,8 +428,9 @@ export default function GestionesPage() {
           <p className="text-slate-500 font-medium">No se encontraron gestiones registradas para {selectedType.toLowerCase()}.</p>
         </div>
       ) : (
+        <>
         <div className="relative space-y-6 before:absolute before:inset-0 before:ml-5 before:-translate-x-px md:before:mx-auto md:before:translate-x-0 before:h-full before:w-0.5 before:bg-gradient-to-b before:from-transparent before:via-slate-200 before:to-transparent">
-          {filteredInteracciones.map((item, i) => (
+          {paginatedInteracciones.map((item, i) => (
             <div key={item.id} className="relative flex items-center justify-between md:justify-normal md:odd:flex-row-reverse group is-active">
               <div className="flex items-center justify-center w-10 h-10 rounded-full border border-white bg-white group-[.is-active]:bg-blue-600 text-slate-400 group-[.is-active]:text-white shadow-lg shrink-0 md:order-1 md:group-odd:-translate-x-1/2 md:group-even:translate-x-1/2 transition-transform group-hover:scale-110">
                 {getTypeIcon(item.tipo_gestion)}
@@ -410,6 +518,37 @@ export default function GestionesPage() {
             </div>
           ))}
         </div>
+
+        {/* Paginador Inferior */}
+        {totalPages > 1 && (
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-4 p-4 card bg-white border border-slate-200 shadow-sm mt-4">
+            <div className="text-xs font-bold text-slate-500">
+              Mostrando <span className="text-slate-800 font-extrabold">{((currentPage - 1) * itemsPerPage) + 1}</span> a{' '}
+              <span className="text-slate-800 font-extrabold">{Math.min(currentPage * itemsPerPage, filteredInteracciones.length)}</span> de{' '}
+              <span className="text-blue-600 font-black">{filteredInteracciones.length}</span> gestiones
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+                disabled={currentPage === 1}
+                className="px-3 py-1.5 rounded-lg border border-slate-200 text-xs font-bold text-slate-600 hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              >
+                Anterior
+              </button>
+              <span className="text-xs font-extrabold text-slate-700 px-2">
+                Página {currentPage} de {totalPages}
+              </span>
+              <button
+                onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
+                disabled={currentPage === totalPages}
+                className="px-3 py-1.5 rounded-lg border border-slate-200 text-xs font-bold text-slate-600 hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              >
+                Siguiente
+              </button>
+            </div>
+          </div>
+        )}
+      </>
       )}
 
       {/* Modal para Registrar Gestión (Llamada/Mensaje) */}
