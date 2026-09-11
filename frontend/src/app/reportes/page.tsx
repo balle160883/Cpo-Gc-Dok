@@ -9,6 +9,8 @@ export default function ReportesPage() {
   const [isAdmin, setIsAdmin] = useState(false);
   const [gestores, setGestores] = useState<any[]>([]);
   const [selectedGestor, setSelectedGestor] = useState<string>("");
+  const [startDate, setStartDate] = useState<string>("");
+  const [endDate, setEndDate] = useState<string>("");
   const [user, setUser] = useState<any>(null);
   const [isMounted, setIsMounted] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -49,8 +51,8 @@ export default function ReportesPage() {
         const effectiveGestor = isAdmin ? selectedGestor : user.gestor;
         const [asig, recu, inte] = await Promise.all([
           fetchAsignaciones(200, effectiveGestor),
-          fetchRecuperacion(effectiveGestor),
-          fetchInteracciones(effectiveGestor)
+          fetchRecuperacion(effectiveGestor, startDate, endDate),
+          fetchInteracciones(effectiveGestor, startDate, endDate)
         ]);
         setAsignaciones(asig);
         setRecuperacion(recu);
@@ -62,7 +64,7 @@ export default function ReportesPage() {
       }
     }
     loadBI();
-  }, [isMounted, user, selectedGestor, isAdmin]);
+  }, [isMounted, user, selectedGestor, startDate, endDate, isAdmin]);
 
   const safeFormatDate = (dateStr: any, isDateTime = false, fallback = 'N/A') => {
     if (!dateStr) return fallback;
@@ -104,7 +106,8 @@ export default function ReportesPage() {
     const worksheet = XLSX.utils.json_to_sheet(dataToExport);
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, "Gestiones");
-    const fileName = `Reporte_Gestiones_${selectedGestor || 'Todos'}_${new Date().toISOString().split('T')[0]}.xlsx`;
+    const dateRangeSuffix = startDate && endDate ? `_${startDate}_al_${endDate}` : startDate ? `_desde_${startDate}` : '';
+    const fileName = `Reporte_Gestiones_${selectedGestor || 'Todos'}${dateRangeSuffix}_${new Date().toISOString().split('T')[0]}.xlsx`;
     XLSX.writeFile(workbook, fileName);
   };
 
@@ -128,11 +131,25 @@ export default function ReportesPage() {
   // Efectividad por Gestor (para Admin) o Global
   const gestoresStats = isAdmin && Array.isArray(gestores) ? gestores.map(g => {
     const gestorRecup = safeRecuperacion.filter(r => r.gestor_id === g.gestor_id).reduce((acc, curr) => acc + (Number(curr.abono_total) || 0), 0);
-    // Simulación de meta basada en asignación si no hay meta explícita
-    const efec = Math.min(Math.round((gestorRecup / 50000) * 100), 100); // 50k como meta base
-    return { name: g.gestor_name, efec, color: g.color || 'bg-blue-500' };
-  }).filter(g => g.efec > 0).slice(0, 4) : [
-    { name: user.gestor, efec: Math.min(Math.round((safeRecuperacion.reduce((acc, curr) => acc + (Number(curr.abono_total) || 0), 0) / 50000) * 100), 100), color: 'bg-blue-600' }
+    const metaGestor = 100000;
+    const cumpli = Math.min(100, Math.round((gestorRecup / metaGestor) * 100));
+    return {
+      name: g.gestor_name,
+      recuperado: `$${gestorRecup.toLocaleString('es-MX')}`,
+      efectividad: `${cumpli}%`,
+      efec: cumpli,
+      color: g.color || 'bg-blue-500',
+      visitas: interacciones.filter(i => (i.gestor_id === g.gestor_id || i.usuarios_gestor?.gestor === g.gestor_name)).length
+    };
+  }) : [
+    { 
+      name: user.gestor, 
+      recuperado: `$${safeRecuperacion.reduce((acc, curr) => acc + (Number(curr.abono_total) || 0), 0).toLocaleString('es-MX')}`,
+      efectividad: `${Math.min(Math.round((safeRecuperacion.reduce((acc, curr) => acc + (Number(curr.abono_total) || 0), 0) / 100000) * 100), 100)}%`,
+      efec: Math.min(Math.round((safeRecuperacion.reduce((acc, curr) => acc + (Number(curr.abono_total) || 0), 0) / 100000) * 100), 100),
+      color: 'bg-blue-600',
+      visitas: interacciones.length
+    }
   ];
 
   // Recuperación Semanal (Gráfico de barras)
@@ -148,15 +165,33 @@ export default function ReportesPage() {
   try {
     return (
       <div className="space-y-6">
-        <div className="flex justify-between items-center">
+        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
           <div>
             <h1 className="text-2xl font-bold text-slate-900">Reportes y BI</h1>
             <p className="text-slate-500 text-sm">Análisis de rendimiento, KPIs de recuperación y productividad de gestores.</p>
           </div>
-          <div className="flex items-center gap-4">
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="flex items-center gap-2 bg-white p-2 rounded-xl border border-slate-200 shadow-sm">
+              <span className="text-[10px] font-bold text-slate-400 uppercase ml-2">Inicio:</span>
+              <input 
+                type="date" 
+                value={startDate}
+                onChange={(e) => setStartDate(e.target.value)}
+                className="text-xs font-bold text-slate-700 focus:outline-none bg-transparent cursor-pointer"
+              />
+            </div>
+            <div className="flex items-center gap-2 bg-white p-2 rounded-xl border border-slate-200 shadow-sm">
+              <span className="text-[10px] font-bold text-slate-400 uppercase ml-2">Fin:</span>
+              <input 
+                type="date" 
+                value={endDate}
+                onChange={(e) => setEndDate(e.target.value)}
+                className="text-xs font-bold text-slate-700 focus:outline-none bg-transparent cursor-pointer"
+              />
+            </div>
             {isAdmin && (
-              <div className="flex items-center gap-2 bg-white p-2 rounded-xl border border-slate-200 shadow-sm mr-2">
-                <span className="text-xs font-bold text-slate-400 uppercase ml-2">Analizar:</span>
+              <div className="flex items-center gap-2 bg-white p-2 rounded-xl border border-slate-200 shadow-sm">
+                <span className="text-xs font-bold text-slate-400 uppercase ml-2">Gestor:</span>
                 <select 
                   value={selectedGestor}
                   onChange={(e) => setSelectedGestor(e.target.value)}
@@ -172,10 +207,10 @@ export default function ReportesPage() {
             <button 
               onClick={handleExportExcel}
               disabled={loading || interacciones.length === 0}
-              className="flex items-center gap-2 px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-sm font-semibold border border-slate-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-sm font-semibold shadow-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <Download size={18} />
-              Exportar Datos
+              Exportar Excel ({interacciones.length})
             </button>
           </div>
         </div>

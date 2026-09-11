@@ -34,23 +34,24 @@ export class CrmService {
 
     for (const item of sorted) {
       const itemTime = new Date(item.fecha_gestion).getTime();
-      const duplicateIdx = uniqueData.findIndex(existing => {
-        if (existing.socio_id !== item.socio_id) return false;
-        if (existing.gestor_id !== item.gestor_id) return false;
-        
+      
+      const isDuplicate = uniqueData.some(existing => {
+        // Mismo ID es duplicado directo
+        if (existing.id && item.id && existing.id === item.id) return true;
+
+        // Solo descartar si es un reintento/doble clic idéntico accidental de red
+        // (mismo gestor, mismo socio, mismo sujeto, misma cuenta, mismo resultado, misma descripción dentro de 3 segundos)
+        if (existing.socio_id !== item.socio_id || existing.gestor_id !== item.gestor_id) return false;
+        if (existing.sujeto_tipo !== item.sujeto_tipo) return false;
+        if (existing.num_cuenta !== item.num_cuenta) return false;
+        if (existing.resultado !== item.resultado) return false;
+        if (existing.descripcion !== item.descripcion) return false;
+
         const diffSeconds = Math.abs(new Date(existing.fecha_gestion).getTime() - itemTime) / 1000;
-        return diffSeconds <= 120; // 2 minutes window
+        return diffSeconds <= 3;
       });
 
-      if (duplicateIdx !== -1) {
-        const existing = uniqueData[duplicateIdx];
-        const existingIsGeneric = existing.descripcion === 'Visita cerrada desde detalle sin comentarios';
-        const currentIsGeneric = item.descripcion === 'Visita cerrada desde detalle sin comentarios';
-
-        if (existingIsGeneric && !currentIsGeneric) {
-          uniqueData[duplicateIdx] = item;
-        }
-      } else {
+      if (!isDuplicate) {
         uniqueData.push(item);
       }
     }
