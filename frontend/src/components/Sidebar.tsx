@@ -12,7 +12,8 @@ import {
   Map,
   LogOut,
   Archive,
-  Upload
+  Upload,
+  Route
 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
@@ -56,6 +57,7 @@ export function Sidebar({ isOpen, onClose }: { isOpen?: boolean, onClose?: () =>
     { icon: MessageSquare, label: 'Gestiones', href: '/gestiones' },
     { icon: CalendarCheck, label: 'Promesas', href: '/promesas' },
     { icon: BarChart3, label: 'Reportes', href: '/reportes' },
+    { icon: Route, label: 'Rutas Diarias', href: '/admin/rutas', adminOnly: true },
     { icon: Archive, label: 'Histórico', href: '/historico', adminOnly: true },
     { icon: Upload, label: 'Importar Avales', href: '/admin/importar', adminOnly: true },
     { icon: CreditCard, label: 'Renta Mensual', href: '/admin/renta', superOnly: true },
