@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { supabase } from '@/lib/supabase';
+import { fetchAllGestores } from '@/lib/api';
 import { 
   Calendar, 
   MapPin, 
@@ -82,28 +83,65 @@ export default function PlanificadorRutasPage() {
   const cargarGestores = async () => {
     setLoading(true);
     try {
-      // 1. Obtener gestores desde asignacion_gestores
-      const { data, error } = await supabase
-        .from('asignacion_gestores')
-        .select('GESTOR ASIGNADO')
-        .neq('SITUACIÓN DEL CRÉDITO', 'LIQUIDADO');
+      let uniqueGestores: string[] = [];
 
-      if (error) throw error;
+      // Intento 1: Usar la API oficial de gestores del backend
+      try {
+        const gestoresApi = await fetchAllGestores();
+        if (Array.isArray(gestoresApi) && gestoresApi.length > 0) {
+          uniqueGestores = gestoresApi
+            .map((g: any) => (g.gestor_name || g.gestor || '').trim())
+            .filter(Boolean);
+        }
+      } catch (apiErr) {
+        console.warn('Fallo fetchAllGestores(), recurriendo a Supabase:', apiErr);
+      }
 
-      if (data) {
-        const unique = Array.from(
-          new Set(
-            data
-              .map((row: any) => row['GESTOR ASIGNADO']?.trim())
-              .filter(Boolean)
-          )
-        ).sort();
+      // Intento 2: Consultar directamente de asignacion_gestores de forma segura
+      if (uniqueGestores.length === 0) {
+        const { data, error } = await supabase
+          .from('asignacion_gestores')
+          .select('GESTOR ASIGNADO')
+          .limit(1000);
 
-        setGestores(unique);
-        
+        if (!error && data) {
+          uniqueGestores = Array.from(
+            new Set(
+              data
+                .map((row: any) => row['GESTOR ASIGNADO']?.trim())
+                .filter(Boolean)
+            )
+          );
+        }
+      }
+
+      // Intento 3: Consultar usuarios_gestor
+      if (uniqueGestores.length === 0) {
+        const { data: usrData } = await supabase
+          .from('usuarios_gestor')
+          .select('gestor');
+
+        if (usrData) {
+          uniqueGestores = Array.from(
+            new Set(
+              usrData
+                .map((row: any) => row.gestor?.trim())
+                .filter(Boolean)
+            )
+          );
+        }
+      }
+
+      uniqueGestores.sort();
+
+      if (uniqueGestores.length > 0) {
+        setGestores(uniqueGestores);
         // Seleccionar por defecto a Jorge si existe, o al primer gestor
-        const defaultGestor = unique.find(g => g.includes('JORGE')) || unique[0] || '';
+        const defaultGestor = uniqueGestores.find(g => g.includes('JORGE')) || uniqueGestores[0] || '';
         setSelectedGestor(defaultGestor);
+        setMessage(null);
+      } else {
+        setMessage({ type: 'error', text: 'No se encontraron gestores en el sistema.' });
       }
     } catch (err: any) {
       console.error('Error al cargar gestores:', err);
@@ -123,11 +161,11 @@ export default function PlanificadorRutasPage() {
 
   const cargarColoniasDelGestor = async (gestor: string) => {
     try {
+      // Hacemos la consulta limpia sin caracteres acentuados en los filtros de la URL
       const { data, error } = await supabase
         .from('asignacion_gestores')
-        .select('COLONIA, SALDO TOTAL')
-        .eq('GESTOR ASIGNADO', gestor)
-        .neq('SITUACIÓN DEL CRÉDITO', 'LIQUIDADO');
+        .select('COLONIA, "SALDO TOTAL", "SITUACIÓN DEL CRÉDITO"')
+        .eq('GESTOR ASIGNADO', gestor);
 
       if (error) throw error;
 
@@ -135,6 +173,9 @@ export default function PlanificadorRutasPage() {
         const coloniaMap = new Map<string, { totalCuentas: number; saldoTotal: number }>();
 
         data.forEach((r: any) => {
+          // Filtrar cuentas liquidadas de forma segura en memoria
+          if (r['SITUACIÓN DEL CRÉDITO'] === 'LIQUIDADO') return;
+
           const col = (r.COLONIA || 'SIN COLONIA ESPECIFICADA').trim().toUpperCase();
           const saldo = Number(r['SALDO TOTAL']) || 0;
 
