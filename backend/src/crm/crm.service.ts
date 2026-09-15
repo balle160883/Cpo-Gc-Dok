@@ -35,23 +35,33 @@ export class CrmService {
     for (const item of sorted) {
       const itemTime = new Date(item.fecha_gestion).getTime();
       
-      const isDuplicate = uniqueData.some(existing => {
+      const duplicateIdx = uniqueData.findIndex(existing => {
         // Mismo ID es duplicado directo
         if (existing.id && item.id && existing.id === item.id) return true;
 
-        // Solo descartar si es un reintento/doble clic idéntico accidental de red
-        // (mismo gestor, mismo socio, mismo sujeto, misma cuenta, mismo resultado, misma descripción dentro de 3 segundos)
-        if (existing.socio_id !== item.socio_id || existing.gestor_id !== item.gestor_id) return false;
-        if (existing.sujeto_tipo !== item.sujeto_tipo) return false;
-        if (existing.num_cuenta !== item.num_cuenta) return false;
-        if (existing.resultado !== item.resultado) return false;
-        if (existing.descripcion !== item.descripcion) return false;
+        const sameGestor = existing.gestor_id === item.gestor_id;
+        const sameCuenta = (existing.num_cuenta && item.num_cuenta && existing.num_cuenta === item.num_cuenta) ||
+                           (existing.socio_id && item.socio_id && existing.socio_id === item.socio_id);
+        const sameSujeto = (existing.sujeto_tipo || 'Socio') === (item.sujeto_tipo || 'Socio');
+
+        if (!sameGestor || !sameCuenta || !sameSujeto) return false;
 
         const diffSeconds = Math.abs(new Date(existing.fecha_gestion).getTime() - itemTime) / 1000;
-        return diffSeconds <= 3;
+        return diffSeconds <= 120;
       });
 
-      if (!isDuplicate) {
+      if (duplicateIdx !== -1) {
+        const existing = uniqueData[duplicateIdx];
+        const existingIsGeneric = existing.descripcion === 'Visita cerrada desde detalle sin comentarios';
+        const itemIsGeneric = item.descripcion === 'Visita cerrada desde detalle sin comentarios';
+
+        // Si el existente era el genérico sin comentarios pero este nuevo tiene el comentario real de campo,
+        // reemplazamos el registro para conservar los datos ricos de la visita real
+        if (existingIsGeneric && !itemIsGeneric) {
+          uniqueData[duplicateIdx] = item;
+        }
+        // Si el item es genérico o ambos son iguales dentro de la ventana de 120s, se omite el duplicado
+      } else {
         uniqueData.push(item);
       }
     }

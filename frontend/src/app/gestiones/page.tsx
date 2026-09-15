@@ -127,6 +127,45 @@ export default function GestionesPage() {
     }
   }, [isAdmin]);
 
+  const deduplicateInteraccionesFrontend = (items: any[]): any[] => {
+    if (!items || items.length === 0) return [];
+    const sorted = [...items].sort((a, b) => new Date(b.fecha_gestion).getTime() - new Date(a.fecha_gestion).getTime());
+    const uniqueData: any[] = [];
+
+    for (const item of sorted) {
+      const itemTime = new Date(item.fecha_gestion).getTime();
+      
+      const duplicateIdx = uniqueData.findIndex(existing => {
+        if (existing.id && item.id && existing.id === item.id) return true;
+
+        const sameGestor = (existing.gestor_id && item.gestor_id && existing.gestor_id === item.gestor_id) ||
+                           (existing.usuarios_gestor?.gestor && item.usuarios_gestor?.gestor && existing.usuarios_gestor?.gestor === item.usuarios_gestor?.gestor);
+        const sameCuenta = (existing.num_cuenta && item.num_cuenta && existing.num_cuenta === item.num_cuenta) ||
+                           (existing.socio_id && item.socio_id && existing.socio_id === item.socio_id);
+        const sameSujeto = (existing.sujeto_tipo || 'Socio') === (item.sujeto_tipo || 'Socio');
+
+        if (!sameGestor || !sameCuenta || !sameSujeto) return false;
+
+        const diffSeconds = Math.abs(new Date(existing.fecha_gestion).getTime() - itemTime) / 1000;
+        return diffSeconds <= 120;
+      });
+
+      if (duplicateIdx !== -1) {
+        const existing = uniqueData[duplicateIdx];
+        const existingIsGeneric = existing.descripcion === 'Visita cerrada desde detalle sin comentarios';
+        const itemIsGeneric = item.descripcion === 'Visita cerrada desde detalle sin comentarios';
+
+        if (existingIsGeneric && !itemIsGeneric) {
+          uniqueData[duplicateIdx] = item;
+        }
+      } else {
+        uniqueData.push(item);
+      }
+    }
+
+    return uniqueData;
+  };
+
   useEffect(() => {
     async function loadData() {
       setLoading(true);
@@ -134,7 +173,7 @@ export default function GestionesPage() {
         const effectiveStart = viewMode === 'dia' ? currentDay : startDate;
         const effectiveEnd = viewMode === 'dia' ? currentDay : endDate;
         const data = await fetchInteracciones(selectedGestor, effectiveStart, effectiveEnd);
-        setInteracciones(data);
+        setInteracciones(deduplicateInteraccionesFrontend(data));
         setCurrentPage(1);
       } catch (error) {
         console.error("Error loading interactions:", error);
