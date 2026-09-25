@@ -113,16 +113,22 @@ export class CrmService {
       ...uniqueStringSocioIds
     ])].filter(Boolean);
 
-    // 3. Fetch assignments (by Socio and by Account) and loans in parallel
-    const [avalesBySocio, avalesByCuenta, prestamos] = await Promise.all([
+    // 3. Fetch assignments (by Socio and by Account), loans and gestores in parallel
+    const gestorIds = [...new Set(uniqueData.map(i => i.gestor_id))].filter(Boolean);
+    const [avalesBySocio, avalesByCuenta, prestamos, gestoresList] = await Promise.all([
       this._fetchInBatches('asignacion_gestores', 'NoSOCIO', friendlyCodes, 'NoSOCIO, NoCUENTA, NOMBRE, "NOMBRE D.A.1", "NOMBRE D.A.2", "FECHA ASIGNACION"'),
       numCuentas.length > 0
         ? this._fetchInBatches('asignacion_gestores', 'NoCUENTA', numCuentas, 'NoSOCIO, NoCUENTA, NOMBRE, "NOMBRE D.A.1", "NOMBRE D.A.2", "FECHA ASIGNACION"')
         : Promise.resolve([]),
-      prestamoIds.length > 0 ? this._fetchInBatches('prestamos_datos', 'prestamo_id', prestamoIds, 'prestamo_id, num_cuenta, socio_id') : Promise.resolve([])
+      prestamoIds.length > 0 ? this._fetchInBatches('prestamos_datos', 'prestamo_id', prestamoIds, 'prestamo_id, num_cuenta, socio_id') : Promise.resolve([]),
+      gestorIds.length > 0 ? this._fetchInBatches('usuarios_gestor', 'id', gestorIds, 'id, gestor') : Promise.resolve([])
     ]);
 
     const avales = [...avalesBySocio, ...avalesByCuenta];
+    const gestoresMap = new Map<string, string>();
+    gestoresList?.forEach((g: any) => {
+      if (g.id && g.gestor) gestoresMap.set(g.id, g.gestor);
+    });
 
     return uniqueData.map(i => {
       const isNum = !isNaN(Number(i.socio_id));
@@ -186,8 +192,11 @@ export class CrmService {
                           (i.tipo_contacto === 'whatsapp' || i.tipo_contacto === 'sms' || i.tipo_contacto === 'mensaje') ? 'Mensaje' :
                           'Visita';
 
+      const gestorNombre = gestoresMap.get(i.gestor_id) || i.usuarios_gestor?.gestor || null;
+
       return {
         ...i,
+        usuarios_gestor: gestorNombre ? { gestor: gestorNombre } : (i.usuarios_gestor || null),
         tipo_gestion: tipoGestion,
         nombre_visitado: isAval ? (avalName || (socioName ? `Aval de ${socioName}` : null)) : socioName,
         socios_datos: foundSocio ? { friendly_code: foundSocio.friendly_code, nombre_completo: foundSocio.nombre_completo } : null,
