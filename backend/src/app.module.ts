@@ -9,6 +9,7 @@ import { AuthModule } from './auth/auth.module';
 import { CrmModule } from './crm/crm.module';
 import { RentaModule } from './renta/renta.module';
 import { MobileModule } from './mobile/mobile.module';
+import { SyncModule } from './sync/sync.module';
 
 @Module({
   imports: [
@@ -20,6 +21,7 @@ import { MobileModule } from './mobile/mobile.module';
     CrmModule,
     RentaModule,
     MobileModule,
+    SyncModule,
   ],
   controllers: [AppController],
   providers: [AppService],
