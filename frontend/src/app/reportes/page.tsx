@@ -77,19 +77,16 @@ export default function ReportesPage() {
     loadBI();
   }, [isMounted, user, selectedGestor, startDate, endDate, isAdmin]);
 
-  // Cargar cuentas al corriente desde Supabase
+  // Cargar cuentas al corriente desde la API del backend
   const loadCuentasAlCorriente = async () => {
     setLoadingAlCorriente(true);
     try {
-      const { data, error } = await supabase
-        .from('asignacion_gestores')
-        .select('*')
-        .like('GESTOR ASIGNADO', 'AL CORRIENTE%')
-        .order('NOMBRE', { ascending: true })
-        .limit(1000);
-
-      if (!error && data) {
-        setCuentasAlCorriente(data);
+      const data = await fetchAsignaciones(1000);
+      if (data && Array.isArray(data)) {
+        const alCorriente = data.filter((a: any) =>
+          (a['GESTOR ASIGNADO'] || '').toUpperCase().startsWith('AL CORRIENTE')
+        );
+        setCuentasAlCorriente(alCorriente);
       }
     } catch (e) {
       console.error("Error fetching cuentas al corriente:", e);
