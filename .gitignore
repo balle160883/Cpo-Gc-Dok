@@ -41,7 +41,7 @@ eslint-folder-name/
 Thumbs.db
 
 # Mobile project (has its own repository)
-mobile/
+/mobile/
 
 # Build artifacts / backups in root
 *.tar.gz
