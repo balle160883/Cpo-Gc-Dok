@@ -8,6 +8,7 @@ import { PortfolioModule } from './portfolio/portfolio.module';
 import { AuthModule } from './auth/auth.module';
 import { CrmModule } from './crm/crm.module';
 import { RentaModule } from './renta/renta.module';
+import { MobileModule } from './mobile/mobile.module';
 
 @Module({
   imports: [
@@ -18,6 +19,7 @@ import { RentaModule } from './renta/renta.module';
     PortfolioModule,
     CrmModule,
     RentaModule,
+    MobileModule,
   ],
   controllers: [AppController],
   providers: [AppService],
