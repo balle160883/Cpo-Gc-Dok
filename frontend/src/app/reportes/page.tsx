@@ -3,7 +3,6 @@
 import { useEffect, useState, useMemo } from "react";
 import { BarChart3, Download, TrendingUp, PieChart, FileText, Loader2, ShieldCheck, Search, FileSpreadsheet, CheckCircle2 } from "lucide-react";
 import { fetchGestoresLocations, fetchAsignaciones, fetchRecuperacion, fetchInteracciones, fetchAllGestores } from "@/lib/api";
-import { supabase } from "@/lib/supabase";
 import * as XLSX from 'xlsx';
 
 export default function ReportesPage() {
