@@ -27,6 +27,11 @@ export default function GestoresMapaPage() {
 
   useEffect(() => {
     if (!mapContainer.current) return;
+    if (!MAPBOX_TOKEN) {
+      console.warn('Mapbox access token is missing. Configure NEXT_PUBLIC_MAPBOX_TOKEN.');
+      setLoading(false);
+      return;
+    }
 
     mapboxgl.accessToken = MAPBOX_TOKEN;
 

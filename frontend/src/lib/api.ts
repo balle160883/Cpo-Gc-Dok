@@ -1,4 +1,21 @@
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'https://api.vesta-track.cloud';
+export function getApiUrl(): string {
+  if (typeof window !== 'undefined') {
+    const host = window.location.hostname;
+    if (host.includes('31.97.144.6.sslip.io') || host.includes('sslip.io')) {
+      return `${window.location.protocol}//api-cobranza.31.97.144.6.sslip.io`;
+    }
+  }
+  if (process.env.NEXT_PUBLIC_API_URL) {
+    return process.env.NEXT_PUBLIC_API_URL;
+  }
+  return 'https://api.vesta-track.cloud';
+}
+
+const API_URL = {
+  toString: () => getApiUrl(),
+  valueOf: () => getApiUrl(),
+  [Symbol.toPrimitive]: () => getApiUrl(),
+} as unknown as string;
 
 function getAuthHeader(): Record<string, string> {
   if (typeof window !== 'undefined') {
