@@ -112,6 +112,31 @@ export class PortfolioService {
     return data;
   }
 
+  async getCuentasAlCorriente(gestorId?: string) {
+    try {
+      let sql = `
+        SELECT 
+          "NoCUENTA", "NoSOCIO", "NOMBRE", "GESTOR ASIGNADO", 
+          "PRODUCTO", "SALDO TOTAL", "SALDO AL DIA", "ULTIMO PAGO", 
+          "PRÓXIMO VENCIMIENTO", "SITUACIÓN DEL CRÉDITO", "DIAS MORA", "TELEFONOS"
+        FROM asignacion_gestores
+        WHERE ("SITUACIÓN DEL CRÉDITO" = 'PREVENTIVA' OR "DIAS MORA"::numeric <= 0)
+      `;
+      const params: any[] = [];
+      if (gestorId && gestorId !== 'all') {
+        params.push(gestorId);
+        sql += ` AND "GESTOR ASIGNADO" = $1`;
+      }
+      sql += ` ORDER BY "NOMBRE" ASC`;
+
+      const result = await this.supabaseService.query(sql, params);
+      return result?.rows || [];
+    } catch (error: any) {
+      this.logger.error(`Error fetching cuentas al corriente: ${error.message}`);
+      return [];
+    }
+  }
+
   private _toUTCStartOfDay(dateStr: string): string {
     if (!dateStr) return dateStr;
     const match = dateStr.match(/^\d{4}-\d{2}-\d{2}$/);

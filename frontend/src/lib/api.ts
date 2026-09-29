@@ -114,6 +114,17 @@ export async function fetchAsignaciones(limit = 100, gestorId?: string): Promise
   return response.json();
 }
 
+export async function fetchCuentasAlCorriente(gestorId?: string): Promise<any[]> {
+  const headers = getAuthHeader();
+  let url = `${API_URL}/portfolio/al-corriente`;
+  if (gestorId && gestorId !== 'all') {
+    url += `?gestorId=${encodeURIComponent(gestorId)}`;
+  }
+  const response = await fetch(url, { headers });
+  if (!response.ok) throw new Error("Failed to fetch cuentas al corriente");
+  return response.json();
+}
+
 export async function fetchDashboardKpis(gestorId?: string, startDate?: string, endDate?: string) {
   const headers = getAuthHeader();
   const params = new URLSearchParams();

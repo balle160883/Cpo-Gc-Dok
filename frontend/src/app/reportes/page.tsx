@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useMemo } from "react";
 import { BarChart3, Download, TrendingUp, PieChart, FileText, Loader2, ShieldCheck, Search, FileSpreadsheet, CheckCircle2 } from "lucide-react";
-import { fetchGestoresLocations, fetchAsignaciones, fetchRecuperacion, fetchInteracciones, fetchAllGestores } from "@/lib/api";
+import { fetchGestoresLocations, fetchAsignaciones, fetchRecuperacion, fetchInteracciones, fetchAllGestores, fetchCuentasAlCorriente } from "@/lib/api";
 import * as XLSX from 'xlsx';
 
 export default function ReportesPage() {
@@ -81,12 +81,10 @@ export default function ReportesPage() {
   const loadCuentasAlCorriente = async () => {
     setLoadingAlCorriente(true);
     try {
-      const data = await fetchAsignaciones(1000);
+      const effectiveGestor = isAdmin ? selectedGestor : user?.gestor;
+      const data = await fetchCuentasAlCorriente(effectiveGestor);
       if (data && Array.isArray(data)) {
-        const alCorriente = data.filter((a: any) =>
-          (a['GESTOR ASIGNADO'] || '').toUpperCase().startsWith('AL CORRIENTE')
-        );
-        setCuentasAlCorriente(alCorriente);
+        setCuentasAlCorriente(data);
       }
     } catch (e) {
       console.error("Error fetching cuentas al corriente:", e);
@@ -99,7 +97,7 @@ export default function ReportesPage() {
     if (isMounted) {
       loadCuentasAlCorriente();
     }
-  }, [isMounted]);
+  }, [isMounted, selectedGestor]);
 
   const safeFormatDate = (dateStr: any, isDateTime = false, fallback = 'N/A') => {
     if (!dateStr) return fallback;
@@ -150,7 +148,7 @@ export default function ReportesPage() {
   const gestoresAlCorriente = useMemo(() => {
     const unique = new Set<string>();
     cuentasAlCorriente.forEach(c => {
-      const g = (c['GESTOR ASIGNADO'] || '').replace('AL CORRIENTE - ', '').trim();
+      const g = (c['GESTOR ASIGNADO'] || '').replace(/^AL CORRIENTE\s*-\s*/i, '').trim();
       if (g) unique.add(g);
     });
     return Array.from(unique).sort();
@@ -158,7 +156,7 @@ export default function ReportesPage() {
 
   const filteredAlCorriente = useMemo(() => {
     return cuentasAlCorriente.filter(item => {
-      const g = (item['GESTOR ASIGNADO'] || '').replace('AL CORRIENTE - ', '').trim();
+      const g = (item['GESTOR ASIGNADO'] || '').replace(/^AL CORRIENTE\s*-\s*/i, '').trim();
       if (selectedGestorAlCorriente && g !== selectedGestorAlCorriente) return false;
       if (searchAlCorriente.trim()) {
         const query = searchAlCorriente.toLowerCase().trim();
@@ -303,7 +301,7 @@ export default function ReportesPage() {
               <ShieldCheck size={16} />
               Cuentas al Corriente
               <span className="bg-emerald-100 text-emerald-700 text-[10px] px-2 py-0.5 rounded-full font-black">
-                {cuentasAlCorriente.length > 0 ? cuentasAlCorriente.length : '748'}
+                {cuentasAlCorriente.length}
               </span>
             </button>
           </div>
@@ -629,7 +627,7 @@ export default function ReportesPage() {
                   <tbody className="divide-y divide-slate-100">
                     {paginatedAlCorriente.length > 0 ? (
                       paginatedAlCorriente.map((item, idx) => {
-                        const gestorOriginal = (item['GESTOR ASIGNADO'] || '').replace('AL CORRIENTE - ', '').trim();
+                        const gestorOriginal = (item['GESTOR ASIGNADO'] || '').replace(/^AL CORRIENTE\s*-\s*/i, '').trim() || 'Sin asignar';
                         return (
                           <tr key={item.NoCUENTA || idx} className="hover:bg-slate-50/80 transition-colors">
                             <td className="px-4 py-3 font-mono font-bold text-slate-800">{item.NoCUENTA}</td>
@@ -642,7 +640,7 @@ export default function ReportesPage() {
                                 {gestorOriginal}
                               </span>
                             </td>
-                            <td className="px-4 py-3 text-slate-600 font-medium">{item.Producto || 'ORDINARIO'}</td>
+                            <td className="px-4 py-3 text-slate-600 font-medium">{item.Producto || item.PRODUCTO || 'ORDINARIO'}</td>
                             <td className="px-4 py-3 text-right font-mono font-bold text-slate-800">
                               ${(Number(item['SALDO TOTAL']) || 0).toLocaleString('es-MX', { minimumFractionDigits: 2 })}
                             </td>

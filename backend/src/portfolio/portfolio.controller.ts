@@ -41,6 +41,16 @@ export class PortfolioController {
     return this.portfolioService.getAsignaciones(limit, effectiveGestorId);
   }
 
+  @Get('al-corriente')
+  async getCuentasAlCorriente(
+    @Request() req: any,
+    @Query('gestorId') gestorId?: string,
+  ) {
+    const rawGestorId = req.user.rol === 'admin' ? gestorId : (gestorId || req.user.gestor);
+    const effectiveGestorId = (rawGestorId && rawGestorId.trim() !== '') ? rawGestorId : undefined;
+    return this.portfolioService.getCuentasAlCorriente(effectiveGestorId);
+  }
+
   @Get('kpis')
   async getDashboardKpis(
     @Request() req: any,
