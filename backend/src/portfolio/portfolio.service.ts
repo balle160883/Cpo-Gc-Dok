@@ -114,20 +114,55 @@ export class PortfolioService {
 
   async getCuentasAlCorriente(gestorId?: string) {
     try {
-      let sql = `
+      // 1. Resguardo automático permanente: Si hay cuentas preventivas o con mora <= 0 en asignaciones,
+      // se copian y aseguran en cuentas_al_corriente_historico para que NUNCA se pierdan aunque salgan de asignaciones
+      await this.supabaseService.query(`
+        INSERT INTO cuentas_al_corriente_historico (
+          nocuenta, nosocio, nombre, gestor_asignado, producto, 
+          saldo_total, saldo_al_dia, dias_mora, situacion_del_credito, 
+          ultimo_pago, proximo_vencimiento, telefonos, origen
+        )
         SELECT 
-          "NoCUENTA", "NoSOCIO", "NOMBRE", "GESTOR ASIGNADO", 
-          "Producto", "SALDO TOTAL", "SALDO AL DIA", "ULTIMO PAGO", 
-          "PRÓXIMO VENCIMIENTO", "SITUACIÓN DEL CRÉDITO", "DIAS MORA", "TELEFONOS"
+          "NoCUENTA", "NoSOCIO", "NOMBRE", "GESTOR ASIGNADO", "Producto",
+          COALESCE("SALDO TOTAL"::numeric, 0), COALESCE("SALDO AL DIA"::numeric, 0), 
+          COALESCE("DIAS MORA"::integer, 0), COALESCE("SITUACIÓN DEL CRÉDITO", 'PREVENTIVA'),
+          "ULTIMO PAGO", "PRÓXIMO VENCIMIENTO", "TELEFONOS", 'AUTO_SYNC'
         FROM asignacion_gestores
         WHERE ("SITUACIÓN DEL CRÉDITO" = 'PREVENTIVA' OR "DIAS MORA"::numeric <= 0)
+        ON CONFLICT (nocuenta, gestor_asignado) DO UPDATE SET
+          saldo_total = EXCLUDED.saldo_total,
+          saldo_al_dia = EXCLUDED.saldo_al_dia,
+          ultimo_pago = EXCLUDED.ultimo_pago,
+          proximo_vencimiento = EXCLUDED.proximo_vencimiento,
+          telefonos = EXCLUDED.telefonos,
+          fecha_resguardo = NOW();
+      `).catch(e => this.logger.warn(`Auto-sync cuentas al corriente warning: ${e.message}`));
+
+      // 2. Consultar directamente desde la tabla permanente histórica
+      let sql = `
+        SELECT 
+          nocuenta AS "NoCUENTA",
+          nosocio AS "NoSOCIO",
+          nombre AS "NOMBRE",
+          gestor_asignado AS "GESTOR ASIGNADO",
+          producto AS "Producto",
+          saldo_total AS "SALDO TOTAL",
+          saldo_al_dia AS "SALDO AL DIA",
+          ultimo_pago AS "ULTIMO PAGO",
+          proximo_vencimiento AS "PRÓXIMO VENCIMIENTO",
+          situacion_del_credito AS "SITUACIÓN DEL CRÉDITO",
+          dias_mora AS "DIAS MORA",
+          telefonos AS "TELEFONOS",
+          fecha_resguardo
+        FROM cuentas_al_corriente_historico
+        WHERE 1=1
       `;
       const params: any[] = [];
       if (gestorId && gestorId !== 'all') {
         params.push(gestorId);
-        sql += ` AND "GESTOR ASIGNADO" = $1`;
+        sql += ` AND gestor_asignado = $1`;
       }
-      sql += ` ORDER BY "NOMBRE" ASC`;
+      sql += ` ORDER BY nombre ASC`;
 
       const result = await this.supabaseService.query(sql, params);
       return result?.rows || [];

@@ -55,6 +55,23 @@ CREATE TABLE IF NOT EXISTS "pagos_recuperados" (
     "abono_capital" NUMERIC,
     "descripcion" TEXT,
     "created_at" TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+CREATE TABLE IF NOT EXISTS "cuentas_al_corriente_historico" (
+    "id" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    "nocuenta" TEXT NOT NULL,
+    "nosocio" TEXT,
+    "nombre" TEXT,
+    "gestor_asignado" TEXT,
+    "producto" TEXT,
+    "saldo_total" NUMERIC DEFAULT 0,
+    "saldo_al_dia" NUMERIC DEFAULT 0,
+    "dias_mora" INTEGER DEFAULT 0,
+    "situacion_del_credito" TEXT DEFAULT 'REGULARIZADO',
+    "ultimo_pago" TEXT,
+    "proximo_vencimiento" TEXT,
+    "telefonos" TEXT,
+    "fecha_resguardo" TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    "origen" TEXT DEFAULT 'ASIGNACION_PREVENTIVA',
+    CONSTRAINT unique_cuenta_gestor UNIQUE (nocuenta, gestor_asignado)
 );
 
 CREATE TABLE IF NOT EXISTS "asignacion_gestores" (
