@@ -41,6 +41,18 @@ export class PortfolioController {
     return this.portfolioService.getAsignaciones(limit, effectiveGestorId);
   }
 
+  @Get('kpis')
+  async getDashboardKpis(
+    @Request() req: any,
+    @Query('gestorId') gestorId?: string,
+    @Query('startDate') startDate?: string,
+    @Query('endDate') endDate?: string
+  ) {
+    const rawGestorId = req.user.rol === 'admin' ? gestorId : (gestorId || req.user.gestor);
+    const effectiveGestorId = (rawGestorId && rawGestorId.trim() !== '') ? rawGestorId : undefined;
+    return this.portfolioService.getDashboardKpis(effectiveGestorId, startDate, endDate);
+  }
+
   @Get('recuperacion')
   async getRecuperacion(
     @Request() req: any, 
@@ -48,7 +60,7 @@ export class PortfolioController {
     @Query('startDate') startDate?: string,
     @Query('endDate') endDate?: string
   ) {
-    const rawGestorId = req.user.rol === 'admin' ? gestorId : req.user.gestorId;
+    const rawGestorId = req.user.rol === 'admin' ? gestorId : (gestorId || req.user.gestor);
     const effectiveGestorId = (rawGestorId && rawGestorId.trim() !== '') ? rawGestorId : undefined;
     return this.portfolioService.getRecuperacion(effectiveGestorId, startDate, endDate);
   }

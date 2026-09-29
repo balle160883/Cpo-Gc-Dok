@@ -114,6 +114,20 @@ export async function fetchAsignaciones(limit = 100, gestorId?: string): Promise
   return response.json();
 }
 
+export async function fetchDashboardKpis(gestorId?: string, startDate?: string, endDate?: string) {
+  const headers = getAuthHeader();
+  const params = new URLSearchParams();
+  if (gestorId && gestorId !== 'all') params.append('gestorId', gestorId);
+  if (startDate) params.append('startDate', startDate);
+  if (endDate) params.append('endDate', endDate);
+
+  const url = `${API_URL}/portfolio/kpis?${params.toString()}`;
+    
+  const response = await fetch(url, { headers });
+  if (!response.ok) throw new Error("Failed to fetch dashboard KPIs");
+  return response.json();
+}
+
 export async function fetchRecuperacion(gestorId?: string, startDate?: string, endDate?: string): Promise<any[]> {
   const headers = getAuthHeader();
   const params = new URLSearchParams();

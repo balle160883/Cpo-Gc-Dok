@@ -133,27 +133,128 @@ export class PortfolioService {
     return dateStr;
   }
 
+  async getDashboardKpis(gestorId?: string, startDate?: string, endDate?: string) {
+    try {
+      // 1. Calcular métricas reales de cartera y mora desde asignacion_gestores
+      let queryAsig = this.supabaseService
+        .getClient()
+        .from('asignacion_gestores')
+        .select('"SALDO TOTAL", "DIAS MORA", "SITUACIÓN DEL CRÉDITO", "GESTOR ASIGNADO"');
+
+      if (gestorId && gestorId !== 'all') {
+        queryAsig = queryAsig.eq('GESTOR ASIGNADO', gestorId);
+      }
+
+      const allAsig: any[] = [];
+      let from = 0;
+      const pageSize = 1000;
+      while (true) {
+        const { data, error } = await queryAsig.range(from, from + pageSize - 1);
+        if (error) {
+          this.logger.error(`Error fetching asignaciones for KPIs: ${error.message}`);
+          break;
+        }
+        if (!data || data.length === 0) break;
+        allAsig.push(...data);
+        if (data.length < pageSize) break;
+        from += pageSize;
+      }
+
+      let totalCartera = 0;
+      let totalVencido = 0;
+      let casosEnMora = 0;
+      let moraTemprana = 0;
+
+      for (const item of allAsig) {
+        if (item['SITUACIÓN DEL CRÉDITO'] !== 'LIQUIDADO') {
+          const saldo = Number(item['SALDO TOTAL']) || 0;
+          const dias = Number(item['DIAS MORA']) || 0;
+          totalCartera += saldo;
+          if (dias > 0) {
+            totalVencido += saldo;
+            casosEnMora++;
+            if (dias <= 30) moraTemprana++;
+          }
+        }
+      }
+
+      // 2. Calcular monto recuperado y cobros validados reales desde pagos_recuperados
+      let queryPagos = this.supabaseService
+        .getClient()
+        .from('pagos_recuperados')
+        .select('id, abono_total, fecha_real, num_credito, nocuenta, gestor_asignado')
+        .gt('abono_total', 0);
+
+      if (startDate) queryPagos = queryPagos.gte('fecha_real', this._toUTCStartOfDay(startDate));
+      if (endDate) queryPagos = queryPagos.lte('fecha_real', this._toUTCEndOfDay(endDate));
+
+      const allPagos: any[] = [];
+      from = 0;
+      while (true) {
+        const { data, error } = await queryPagos.range(from, from + pageSize - 1);
+        if (error) {
+          this.logger.error(`Error fetching pagos for KPIs: ${error.message}`);
+          break;
+        }
+        if (!data || data.length === 0) break;
+        allPagos.push(...data);
+        if (data.length < pageSize) break;
+        from += pageSize;
+      }
+
+      let finalPagos = allPagos;
+      if (gestorId && gestorId !== 'all') {
+        finalPagos = allPagos.filter(p => p.gestor_asignado === gestorId);
+      }
+
+      const montoRecuperado = finalPagos.reduce((acc, curr) => acc + (Number(curr.abono_total) || 0), 0);
+      const cobrosValidados = finalPagos.length;
+
+      return {
+        totalCartera,
+        totalVencido,
+        casosEnMora,
+        moraTemprana,
+        totalCasos: allAsig.length,
+        montoRecuperado,
+        cobrosValidados
+      };
+    } catch (err: any) {
+      this.logger.error(`Fatal error in getDashboardKpis: ${err.message}`);
+      return {
+        totalCartera: 0,
+        totalVencido: 0,
+        casosEnMora: 0,
+        moraTemprana: 0,
+        totalCasos: 0,
+        montoRecuperado: 0,
+        cobrosValidados: 0
+      };
+    }
+  }
+
   async getRecuperacion(gestorId?: string, startDate?: string, endDate?: string) {
     const recoveryDocs: any[] = [];
 
     try {
-      // 1. Obtener de pagos_recuperados
+      // 1. Obtener de pagos_recuperados únicamente pagos reales con abono_total > 0
       let queryPagos = this.supabaseService
         .getClient()
         .from('pagos_recuperados')
-        .select('*');
+        .select('*')
+        .gt('abono_total', 0);
 
       if (startDate) queryPagos = queryPagos.gte('fecha_real', this._toUTCStartOfDay(startDate));
       if (endDate) queryPagos = queryPagos.lte('fecha_real', this._toUTCEndOfDay(endDate));
 
       const { data: pagosLog, error: errorPagos } = await queryPagos
-        .order('created_at', { ascending: false })
+        .order('fecha_real', { ascending: false })
         .limit(200);
 
       if (errorPagos) {
         this.logger.error(`Error fetching pagos_recuperados: ${errorPagos.message}`);
       } else if (pagosLog && pagosLog.length > 0) {
-        const cuentas = [...new Set(pagosLog.map(p => p.num_credito))];
+        const cuentas = [...new Set(pagosLog.map(p => p.num_credito || p.nocuenta).filter(Boolean))];
         const { data: gestoresMap } = await this.supabaseService
           .getClient()
           .from('asignacion_gestores')
@@ -163,78 +264,20 @@ export class PortfolioService {
         const gestorByCuenta = new Map(gestoresMap?.map(g => [g.NoCUENTA, g['GESTOR ASIGNADO']]) || []);
         
         pagosLog.forEach(item => {
-          const gestorResponsable = gestorByCuenta.get(item.num_credito) || 'Sistema';
-          if (!gestorId || gestorResponsable === gestorId) {
+          const cred = item.num_credito || item.nocuenta || 'N/A';
+          const gestorResponsable = item.gestor_asignado || gestorByCuenta.get(cred) || 'Sistema';
+          if (!gestorId || gestorId === 'all' || gestorResponsable === gestorId) {
             recoveryDocs.push({
               id: item.id,
-              abono_total: item.abono_total,
-              nombre: item.nombre,
-              numero_socio: item.numero_socio,
-              num_credito: item.num_credito,
+              abono_total: Number(item.abono_total) || 0,
+              nombre: item.nombre || 'Sin nombre',
+              numero_socio: item.numero_socio || item.nosocio || 'N/A',
+              num_credito: cred,
               fecha_real: item.fecha_real || item.created_at || item.fecha,
               gestor: gestorResponsable,
               tipo: 'PAGO_REAL'
             });
           }
-        });
-      }
-
-      // 2. Obtener de asignacion_gestores
-      let queryActivos = this.supabaseService
-        .getClient()
-        .from('asignacion_gestores')
-        .select('"GESTOR ASIGNADO", "CAPITAL MOROSO", NoSOCIO, NOMBRE, NoCUENTA, "FECHA ASIGNACION", "SITUACIÓN DEL CRÉDITO"');
-
-      if (gestorId) queryActivos = queryActivos.eq('GESTOR ASIGNADO', gestorId);
-      if (startDate) queryActivos = queryActivos.gte('FECHA ASIGNACION', startDate);
-      if (endDate) queryActivos = queryActivos.lte('FECHA ASIGNACION', endDate);
-
-      const { data: activos, error: errorActivos } = await queryActivos.limit(100);
-      if (errorActivos) {
-        this.logger.error(`Error fetching asignacion_gestores for recovery: ${errorActivos.message}`);
-      } else if (activos) {
-        activos.forEach(item => {
-          if (item['CAPITAL MOROSO'] > 0 || item['SITUACIÓN DEL CRÉDITO'] === 'LIQUIDADO') {
-            recoveryDocs.push({
-              abono_total: item['CAPITAL MOROSO'],
-              nombre: item.NOMBRE,
-              numero_socio: item.NoSOCIO,
-              num_credito: item.NoCUENTA,
-              fecha_real: item['FECHA ASIGNACION'],
-              gestor: item['GESTOR ASIGNADO'],
-              tipo: 'CARTERA_ACTIVA'
-            });
-          }
-        });
-      }
-
-      // 3. Obtener de recuperaciones_archivadas
-      let histQuery = this.supabaseService
-        .getClient()
-        .from('recuperaciones_archivadas')
-        .select('gestor_asignado, capital_moroso, nosocio, nombre, nocuenta, fecha_asignacion');
-      
-      if (gestorId) histQuery = histQuery.eq('gestor_asignado', gestorId);
-      if (startDate) histQuery = histQuery.gte('fecha_asignacion', startDate);
-      if (endDate) histQuery = histQuery.lte('fecha_asignacion', endDate);
-
-      const { data: historicos, error: errorHistoricos } = await histQuery
-        .order('fecha_asignacion', { ascending: false })
-        .limit(100);
-
-      if (errorHistoricos) {
-        this.logger.error(`Error fetching recuperaciones_archivadas: ${errorHistoricos.message}`);
-      } else if (historicos) {
-        historicos.forEach(item => {
-          recoveryDocs.push({
-            abono_total: item.capital_moroso,
-            nombre: item.nombre,
-            numero_socio: item.nosocio,
-            num_credito: item.nocuenta,
-            fecha_real: item.fecha_asignacion,
-            gestor: item.gestor_asignado,
-            tipo: 'ARCHIVO'
-          });
         });
       }
 
@@ -244,7 +287,7 @@ export class PortfolioService {
         return dateB - dateA;
       });
 
-    } catch (err) {
+    } catch (err: any) {
       this.logger.error(`Fatal error in getRecuperacion: ${err.message}`);
     }
 

@@ -15,11 +15,28 @@ import {
   TrendingUp,
   DollarSign
 } from "lucide-react";
-import { fetchAsignaciones, fetchRecuperacion, fetchAllGestores } from "@/lib/api";
+import { fetchAsignaciones, fetchRecuperacion, fetchAllGestores, fetchDashboardKpis } from "@/lib/api";
 
 export default function DashboardPage() {
   const [asignaciones, setAsignaciones] = useState<any[]>([]);
   const [recuperacion, setRecuperacion] = useState<any[]>([]);
+  const [kpis, setKpis] = useState<{
+    totalCartera: number;
+    totalVencido: number;
+    casosEnMora: number;
+    moraTemprana: number;
+    totalCasos: number;
+    montoRecuperado: number;
+    cobrosValidados: number;
+  }>({
+    totalCartera: 0,
+    totalVencido: 0,
+    casosEnMora: 0,
+    moraTemprana: 0,
+    totalCasos: 0,
+    montoRecuperado: 0,
+    cobrosValidados: 0
+  });
   const [loading, setLoading] = useState(true);
   const [user, setUser] = useState<any>(null);
   const [isAdmin, setIsAdmin] = useState(false);
@@ -65,13 +82,20 @@ export default function DashboardPage() {
       setLoading(true);
       try {
         const effectiveGestor = isAdmin ? selectedGestor : (user.gestor);
-        // Cargar asignaciones y recuperación en paralelo
-        const [asigData, recupData] = await Promise.all([
+        // Cargar asignaciones, recuperación y KPIs consolidados en paralelo
+        const [asigData, recupData, kpisData] = await Promise.all([
           fetchAsignaciones(50, effectiveGestor),
-          fetchRecuperacion(effectiveGestor, startDate, endDate)
+          fetchRecuperacion(effectiveGestor, startDate, endDate),
+          fetchDashboardKpis(effectiveGestor, startDate, endDate).catch(err => {
+            console.error("Error fetching KPIs:", err);
+            return null;
+          })
         ]);
         setAsignaciones(asigData);
         setRecuperacion(recupData);
+        if (kpisData) {
+          setKpis(kpisData);
+        }
       } catch (error) {
         console.error("Error loading dashboard data:", error);
       } finally {
@@ -98,10 +122,29 @@ export default function DashboardPage() {
   const safeAsignaciones = Array.isArray(asignaciones) ? asignaciones : [];
   const safeRecuperacion = Array.isArray(recuperacion) ? recuperacion : [];
 
-  const totalCartera = safeAsignaciones.reduce((acc, curr) => acc + (Number(curr?.['SALDO TOTAL']) || 0), 0);
-  const totalVencido = safeAsignaciones.filter(a => (Number(a?.['DIAS MORA']) || 0) > 0).reduce((acc, curr) => acc + (Number(curr?.['SALDO TOTAL']) || 0), 0);
-  const montoRecuperado = safeRecuperacion.reduce((acc, curr) => acc + (Number(curr?.['abono_total']) || 0), 0);
-  const moraTemprana = safeAsignaciones.filter(a => (Number(a?.['DIAS MORA']) || 0) > 0 && (Number(a?.['DIAS MORA']) || 0) <= 30).length;
+  const displayCartera = kpis.totalCartera > 0 
+    ? kpis.totalCartera 
+    : safeAsignaciones.reduce((acc, curr) => acc + (Number(curr?.['SALDO TOTAL']) || 0), 0);
+
+  const displayVencido = kpis.totalVencido > 0
+    ? kpis.totalVencido
+    : safeAsignaciones.filter(a => (Number(a?.['DIAS MORA']) || 0) > 0).reduce((acc, curr) => acc + (Number(curr?.['SALDO TOTAL']) || 0), 0);
+
+  const displayCasosMora = kpis.casosEnMora > 0
+    ? kpis.casosEnMora
+    : safeAsignaciones.filter(a => (Number(a?.['DIAS MORA']) || 0) > 0).length;
+
+  const displayMoraTemprana = kpis.moraTemprana > 0
+    ? kpis.moraTemprana
+    : safeAsignaciones.filter(a => (Number(a?.['DIAS MORA']) || 0) > 0 && (Number(a?.['DIAS MORA']) || 0) <= 30).length;
+
+  const displayRecuperado = kpis.montoRecuperado > 0
+    ? kpis.montoRecuperado
+    : safeRecuperacion.reduce((acc, curr) => acc + (Number(curr?.['abono_total']) || 0), 0);
+
+  const displayCobrosValidados = kpis.cobrosValidados > 0
+    ? kpis.cobrosValidados
+    : safeRecuperacion.length;
   
   // Agrupar recuperación por gestor para el ranking (Solo para Admin)
   const rankingGestores = isAdmin ? Object.values(
@@ -184,30 +227,30 @@ export default function DashboardPage() {
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
           <StatCard 
             title="Cartera Total" 
-            value={`$${(Number(totalCartera) || 0).toLocaleString()}`} 
+            value={`$${(Number(displayCartera) || 0).toLocaleString()}`} 
             icon={<Users className="text-blue-600" />} 
             trend="Activos en gestión"
             trendUp={true}
           />
           <StatCard 
             title="Mora Total" 
-            value={`$${(Number(totalVencido) || 0).toLocaleString()}`} 
+            value={`$${(Number(displayVencido) || 0).toLocaleString()}`} 
             icon={<TrendingDown className="text-red-600" />} 
             trend="Saldo en riesgo"
             trendUp={false}
           />
           <StatCard 
             title="Casos en Mora" 
-            value={safeAsignaciones.filter(a => (Number(a?.['DIAS MORA']) || 0) > 0).length.toString()} 
+            value={displayCasosMora.toString()} 
             icon={<Clock className="text-orange-600" />} 
-            trend={`${moraTemprana} mora temprana`}
+            trend={`${displayMoraTemprana} mora temprana`}
             trendUp={false}
           />
           <StatCard 
             title="Recuperación del Mes" 
-            value={`$${(Number(montoRecuperado) || 0).toLocaleString()}`} 
+            value={`$${(Number(displayRecuperado) || 0).toLocaleString()}`} 
             icon={<CheckCircle2 className="text-emerald-600" />} 
-            trend={`${safeRecuperacion.length} cobros validados`}
+            trend={`${displayCobrosValidados} cobros validados`}
             trendUp={true}
           />
         </div>
@@ -244,25 +287,33 @@ export default function DashboardPage() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-50">
-                    {safeRecuperacion.slice(0, 8).map((rec, i) => (
-                      <tr key={i} className="hover:bg-blue-50/50 transition-colors group cursor-pointer" onClick={() => { setSelectedRecovery(rec); setIsDetailModalOpen(true); }}>
-                        <td className="py-4 px-4">
-                          <div className="font-black text-slate-700 group-hover:text-blue-700 transition-colors truncate max-w-[150px] uppercase text-[11px]">{rec?.nombre || 'Sin nombre'}</div>
-                        </td>
-                        <td className="py-4 px-4 text-[10px] font-mono font-bold text-slate-400">{rec?.num_credito}</td>
-                        <td className="py-4 px-4 font-black text-slate-900 text-sm">${(Number(rec?.abono_total) || 0).toLocaleString()}</td>
-                        <td className="py-4 px-4 text-center">
-                          <span className="px-2 py-0.5 rounded-md text-[9px] font-black bg-emerald-50 text-emerald-600 border border-emerald-100 uppercase">
-                            INGRESADO
-                          </span>
-                        </td>
-                        <td className="py-4 px-4 text-right">
-                          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-tighter">
-                            {new Date(rec?.fecha_real).toLocaleDateString()}
-                          </span>
+                    {safeRecuperacion.length === 0 ? (
+                      <tr>
+                        <td colSpan={5} className="py-12 text-center text-slate-400 text-xs font-medium uppercase tracking-wider">
+                          No se encontraron cobros validados en este periodo
                         </td>
                       </tr>
-                    ))}
+                    ) : (
+                      safeRecuperacion.slice(0, 8).map((rec, i) => (
+                        <tr key={i} className="hover:bg-blue-50/50 transition-colors group cursor-pointer" onClick={() => { setSelectedRecovery(rec); setIsDetailModalOpen(true); }}>
+                          <td className="py-4 px-4">
+                            <div className="font-black text-slate-700 group-hover:text-blue-700 transition-colors truncate max-w-[150px] uppercase text-[11px]">{rec?.nombre || 'Sin nombre'}</div>
+                          </td>
+                          <td className="py-4 px-4 text-[10px] font-mono font-bold text-slate-400">{rec?.num_credito || 'N/A'}</td>
+                          <td className="py-4 px-4 font-black text-slate-900 text-sm">${(Number(rec?.abono_total) || 0).toLocaleString()}</td>
+                          <td className="py-4 px-4 text-center">
+                            <span className="px-2 py-0.5 rounded-md text-[9px] font-black bg-emerald-50 text-emerald-600 border border-emerald-100 uppercase">
+                              COBRADO
+                            </span>
+                          </td>
+                          <td className="py-4 px-4 text-right">
+                            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-tighter">
+                              {rec?.fecha_real ? new Date(rec.fecha_real).toLocaleDateString() : 'N/A'}
+                            </span>
+                          </td>
+                        </tr>
+                      ))
+                    )}
                   </tbody>
                 </table>
               )}
@@ -303,13 +354,13 @@ export default function DashboardPage() {
                           className={`h-full transition-all duration-1000 ease-out ${
                             idx === 0 ? 'bg-blue-500' : 'bg-slate-600'
                           }`}
-                          style={{ width: `${(gestor.total / (rankingGestores[0] as any).total) * 100}%` }}
+                          style={{ width: `${(gestor.total / ((rankingGestores[0] as any)?.total || 1)) * 100}%` }}
                         ></div>
                       </div>
                       <div className="flex justify-between mt-1">
                         <span className="text-[8px] font-black text-white/30 uppercase tracking-widest">{gestor.count} PAGOS COBRADOS</span>
                         <span className="text-[8px] font-black text-white/30 uppercase tracking-widest">
-                          {((gestor.total / montoRecuperado) * 100).toFixed(1)}% DEL TOTAL
+                          {(((gestor.total || 0) / (displayRecuperado || 1)) * 100).toFixed(1)}% DEL TOTAL
                         </span>
                       </div>
                     </div>
