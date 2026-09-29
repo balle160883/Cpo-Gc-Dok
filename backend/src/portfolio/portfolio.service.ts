@@ -117,7 +117,7 @@ export class PortfolioService {
       let sql = `
         SELECT 
           "NoCUENTA", "NoSOCIO", "NOMBRE", "GESTOR ASIGNADO", 
-          "PRODUCTO", "SALDO TOTAL", "SALDO AL DIA", "ULTIMO PAGO", 
+          "Producto", "SALDO TOTAL", "SALDO AL DIA", "ULTIMO PAGO", 
           "PRÓXIMO VENCIMIENTO", "SITUACIÓN DEL CRÉDITO", "DIAS MORA", "TELEFONOS"
         FROM asignacion_gestores
         WHERE ("SITUACIÓN DEL CRÉDITO" = 'PREVENTIVA' OR "DIAS MORA"::numeric <= 0)
