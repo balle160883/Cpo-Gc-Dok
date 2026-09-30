@@ -1,8 +1,13 @@
 'use client';
 
 import React, { useState, useEffect, useMemo } from 'react';
-import { supabase } from '@/lib/supabase';
-import { fetchAllGestores } from '@/lib/api';
+import { 
+  fetchAllGestores, 
+  fetchColoniasGestor, 
+  fetchRutasProgramadas, 
+  guardarRutasProgramadas, 
+  eliminarRutaProgramada 
+} from '@/lib/api';
 import { 
   Calendar, 
   MapPin, 
@@ -79,13 +84,12 @@ export default function PlanificadorRutasPage() {
     cargarGestores();
   }, []);
 
-  // Cargar lista única de gestores con asignaciones activas
+  // Cargar lista única de gestores con asignaciones activas desde Dokploy
   const cargarGestores = async () => {
     setLoading(true);
     try {
       let uniqueGestores: string[] = [];
 
-      // Intento 1: Usar la API oficial de gestores del backend
       try {
         const gestoresApi = await fetchAllGestores();
         if (Array.isArray(gestoresApi) && gestoresApi.length > 0) {
@@ -94,42 +98,7 @@ export default function PlanificadorRutasPage() {
             .filter(Boolean);
         }
       } catch (apiErr) {
-        console.warn('Fallo fetchAllGestores(), recurriendo a Supabase:', apiErr);
-      }
-
-      // Intento 2: Consultar directamente de asignacion_gestores de forma segura
-      if (uniqueGestores.length === 0) {
-        const { data, error } = await supabase
-          .from('asignacion_gestores')
-          .select('GESTOR ASIGNADO')
-          .limit(1000);
-
-        if (!error && data) {
-          uniqueGestores = Array.from(
-            new Set(
-              data
-                .map((row: any) => row['GESTOR ASIGNADO']?.trim())
-                .filter(Boolean)
-            )
-          );
-        }
-      }
-
-      // Intento 3: Consultar usuarios_gestor
-      if (uniqueGestores.length === 0) {
-        const { data: usrData } = await supabase
-          .from('usuarios_gestor')
-          .select('gestor');
-
-        if (usrData) {
-          uniqueGestores = Array.from(
-            new Set(
-              usrData
-                .map((row: any) => row.gestor?.trim())
-                .filter(Boolean)
-            )
-          );
-        }
+        console.warn('Error al obtener gestores:', apiErr);
       }
 
       uniqueGestores.sort();
@@ -161,39 +130,13 @@ export default function PlanificadorRutasPage() {
 
   const cargarColoniasDelGestor = async (gestor: string) => {
     try {
-      // Hacemos la consulta limpia sin caracteres acentuados en los filtros de la URL
-      const { data, error } = await supabase
-        .from('asignacion_gestores')
-        .select('COLONIA, "SALDO TOTAL", "SITUACIÓN DEL CRÉDITO"')
-        .eq('GESTOR ASIGNADO', gestor);
-
-      if (error) throw error;
-
-      if (data) {
-        const coloniaMap = new Map<string, { totalCuentas: number; saldoTotal: number }>();
-
-        data.forEach((r: any) => {
-          // Filtrar cuentas liquidadas de forma segura en memoria
-          if (r['SITUACIÓN DEL CRÉDITO'] === 'LIQUIDADO') return;
-
-          const col = (r.COLONIA || 'SIN COLONIA ESPECIFICADA').trim().toUpperCase();
-          const saldo = Number(r['SALDO TOTAL']) || 0;
-
-          if (!coloniaMap.has(col)) {
-            coloniaMap.set(col, { totalCuentas: 0, saldoTotal: 0 });
-          }
-
-          const current = coloniaMap.get(col)!;
-          current.totalCuentas += 1;
-          current.saldoTotal += saldo;
-        });
-
-        const stats: ColoniaStat[] = Array.from(coloniaMap.entries()).map(([nombre, s]) => ({
-          nombre,
-          totalCuentas: s.totalCuentas,
-          saldoTotal: s.saldoTotal
-        })).sort((a, b) => b.totalCuentas - a.totalCuentas);
-
+      const data = await fetchColoniasGestor(gestor);
+      if (Array.isArray(data)) {
+        const stats: ColoniaStat[] = data.map((item: any) => ({
+          nombre: item.nombre,
+          totalCuentas: Number(item.totalCuentas) || 0,
+          saldoTotal: Number(item.saldoTotal) || 0
+        }));
         setColonias(stats);
       }
     } catch (err: any) {
@@ -203,17 +146,9 @@ export default function PlanificadorRutasPage() {
 
   const cargarRutasProgramadas = async (gestor: string) => {
     try {
-      const { data, error } = await supabase
-        .from('planificacion_rutas_diarias')
-        .select('*')
-        .eq('gestor_nombre', gestor)
-        .order('fecha', { ascending: true });
-
-      if (!error && data) {
+      const data = await fetchRutasProgramadas(gestor);
+      if (Array.isArray(data)) {
         setRutasAsignadas(data);
-      } else if (error && error.code === '42P01') {
-        // La tabla aún no ha sido creada
-        console.warn('La tabla planificacion_rutas_diarias aún no está creada en Supabase.');
       }
     } catch (err: any) {
       console.error('Error cargando rutas programadas:', err);
@@ -296,11 +231,7 @@ export default function PlanificadorRutasPage() {
         };
       });
 
-      const { data, error } = await supabase
-        .from('planificacion_rutas_diarias')
-        .upsert(recordsToInsert, { onConflict: 'gestor_nombre,fecha,colonia' });
-
-      if (error) throw error;
+      await guardarRutasProgramadas(recordsToInsert);
 
       setMessage({ 
         type: 'success', 
@@ -313,7 +244,7 @@ export default function PlanificadorRutasPage() {
       console.error('Error al guardar ruta diaria:', err);
       setMessage({ 
         type: 'error', 
-        text: err.message || 'Error al guardar la ruta en Supabase. Asegúrate de haber ejecutado el script SQL de migración.' 
+        text: err.message || 'Error al guardar la ruta en Dokploy.' 
       });
     } finally {
       setSaving(false);
@@ -323,13 +254,7 @@ export default function PlanificadorRutasPage() {
   // Eliminar una ruta programada
   const handleEliminarRuta = async (id: string) => {
     try {
-      const { error } = await supabase
-        .from('planificacion_rutas_diarias')
-        .delete()
-        .eq('id', id);
-
-      if (error) throw error;
-
+      await eliminarRutaProgramada(id);
       setRutasAsignadas(prev => prev.filter(r => r.id !== id));
       setMessage({ type: 'success', text: 'Ruta desasignada correctamente.' });
     } catch (err: any) {
@@ -474,7 +399,7 @@ export default function PlanificadorRutasPage() {
               <div>
                 <h2 className="text-lg font-bold text-white flex items-center gap-2">
                   <MapPin className="w-5 h-5 text-emerald-400" />
-                  2. Colonias Asignadas en Supabase
+                  2. Colonias Asignadas en Dokploy
                 </h2>
                 <p className="text-xs text-slate-400">
                   Total de colonias de {selectedGestor}: <strong className="text-slate-200">{colonias.length}</strong>
@@ -573,7 +498,7 @@ export default function PlanificadorRutasPage() {
                 }`}
               >
                 {saving ? (
-                  <span>Guardando ruta en Supabase...</span>
+                  <span>Guardando ruta en Dokploy...</span>
                 ) : (
                   <>
                     <span>Asignar {selectedColonias.length} colonia(s) para el {selectedFecha}</span>

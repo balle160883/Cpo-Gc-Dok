@@ -573,4 +573,70 @@ export class PortfolioService {
       gestoresNoEncontrados: Array.from(unmatchedGestores)
     };
   }
+
+  async getColoniasGestor(gestor: string) {
+    try {
+      const sql = `
+        SELECT 
+          COALESCE(NULLIF(TRIM(UPPER("COLONIA")), ''), 'SIN COLONIA ESPECIFICADA') as nombre,
+          COUNT(*)::integer as "totalCuentas",
+          SUM(COALESCE("SALDO TOTAL"::numeric, 0)) as "saldoTotal"
+        FROM asignacion_gestores
+        WHERE "GESTOR ASIGNADO" = $1
+          AND ("SITUACIÓN DEL CRÉDITO" != 'LIQUIDADO' OR "SITUACIÓN DEL CRÉDITO" IS NULL)
+        GROUP BY COALESCE(NULLIF(TRIM(UPPER("COLONIA")), ''), 'SIN COLONIA ESPECIFICADA')
+        ORDER BY "totalCuentas" DESC
+      `;
+      const res = await this.supabaseService.query(sql, [gestor]);
+      return res?.rows || [];
+    } catch (err: any) {
+      this.logger.error(`Error getColoniasGestor: ${err.message}`);
+      return [];
+    }
+  }
+
+  async getRutasProgramadas(gestor: string) {
+    try {
+      const sql = `
+        SELECT id, gestor_nombre, fecha, colonia, total_cuentas, asignado_por, created_at
+        FROM planificacion_rutas_diarias
+        WHERE gestor_nombre = $1
+        ORDER BY fecha ASC, colonia ASC
+      `;
+      const res = await this.supabaseService.query(sql, [gestor]);
+      return res?.rows || [];
+    } catch (err: any) {
+      this.logger.error(`Error getRutasProgramadas: ${err.message}`);
+      return [];
+    }
+  }
+
+  async guardarRutasProgramadas(rutas: any[]) {
+    try {
+      for (const r of rutas) {
+        await this.supabaseService.query(`
+          INSERT INTO planificacion_rutas_diarias (
+            gestor_nombre, fecha, colonia, total_cuentas, asignado_por
+          ) VALUES ($1, $2, $3, $4, $5)
+          ON CONFLICT (gestor_nombre, fecha, colonia) DO UPDATE SET
+            total_cuentas = EXCLUDED.total_cuentas,
+            asignado_por = EXCLUDED.asignado_por
+        `, [r.gestor_nombre, r.fecha, r.colonia, r.total_cuentas || 0, r.asignado_por || 'Sistema']);
+      }
+      return { success: true };
+    } catch (err: any) {
+      this.logger.error(`Error guardarRutasProgramadas: ${err.message}`);
+      throw err;
+    }
+  }
+
+  async eliminarRutaProgramada(id: string) {
+    try {
+      await this.supabaseService.query(`DELETE FROM planificacion_rutas_diarias WHERE id = $1`, [id]);
+      return { success: true };
+    } catch (err: any) {
+      this.logger.error(`Error eliminarRutaProgramada: ${err.message}`);
+      throw err;
+    }
+  }
 }

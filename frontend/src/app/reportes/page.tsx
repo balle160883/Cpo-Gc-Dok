@@ -358,7 +358,7 @@ export default function ReportesPage() {
             {loading ? (
               <div className="p-20 flex flex-col items-center justify-center card">
                 <Loader2 className="animate-spin text-blue-600 mb-4" size={40} />
-                <p className="text-slate-500 font-bold">Procesando métricas de Supabase...</p>
+                <p className="text-slate-500 font-bold">Procesando métricas de Dokploy...</p>
               </div>
             ) : (
               <>

@@ -79,7 +79,7 @@ export default function CreditosPage() {
           <div className="mt-4">
             <div className="text-3xl font-extrabold">${totalCartera.toLocaleString()}</div>
             <div className="text-blue-100 text-xs flex items-center gap-1 mt-1 font-medium">
-              Sincronizado con Supabase
+              Sincronizado con Dokploy
             </div>
           </div>
         </div>

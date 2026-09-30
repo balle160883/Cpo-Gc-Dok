@@ -425,7 +425,7 @@ export default function HistoricoPage() {
           </span>
           <div className="flex items-center gap-1 bg-white px-3 py-1 rounded-full shadow-sm border border-slate-200">
              <div className="w-1.5 h-1.5 rounded-full bg-blue-600 animate-pulse"></div>
-             <span className="text-[10px] font-black text-slate-600">Sincronizado con Supabase</span>
+             <span className="text-[10px] font-black text-slate-600">Sincronizado con Dokploy</span>
           </div>
         </div>
       </div>

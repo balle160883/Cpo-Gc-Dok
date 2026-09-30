@@ -239,3 +239,40 @@ export async function importAvales(file: File) {
   
   return res.json();
 }
+
+export async function fetchColoniasGestor(gestor: string): Promise<any[]> {
+  const headers = getAuthHeader();
+  const res = await fetch(`${API_URL}/portfolio/colonias?gestor=${encodeURIComponent(gestor)}`, { headers });
+  if (!res.ok) throw new Error("Error al obtener colonias");
+  return res.json();
+}
+
+export async function fetchRutasProgramadas(gestor: string): Promise<any[]> {
+  const headers = getAuthHeader();
+  const res = await fetch(`${API_URL}/portfolio/rutas?gestor=${encodeURIComponent(gestor)}`, { headers });
+  if (!res.ok) throw new Error("Error al obtener rutas programadas");
+  return res.json();
+}
+
+export async function guardarRutasProgramadas(rutas: any[]): Promise<any> {
+  const res = await fetch(`${API_URL}/portfolio/rutas`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...getAuthHeader(),
+    },
+    body: JSON.stringify({ rutas }),
+  });
+  if (!res.ok) throw new Error("Error al guardar rutas");
+  return res.json();
+}
+
+export async function eliminarRutaProgramada(id: string): Promise<any> {
+  const res = await fetch(`${API_URL}/portfolio/rutas/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+    headers: getAuthHeader(),
+  });
+  if (!res.ok) throw new Error("Error al eliminar ruta");
+  return res.json();
+}
+

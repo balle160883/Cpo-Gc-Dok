@@ -1,4 +1,4 @@
-import { Controller, Get, Param, Query, UseGuards, Request, Patch, Body, Post, UseInterceptors, UploadedFile } from '@nestjs/common';
+import { Controller, Get, Param, Query, UseGuards, Request, Patch, Body, Post, Delete, UseInterceptors, UploadedFile } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { PortfolioService } from './portfolio.service';
 import { AuthGuard } from '@nestjs/passport';
@@ -95,4 +95,25 @@ export class PortfolioController {
   async importAvales(@UploadedFile() file: Express.Multer.File) {
     return this.portfolioService.importAvales(file.buffer);
   }
+
+  @Get('colonias')
+  async getColonias(@Query('gestor') gestor: string) {
+    return this.portfolioService.getColoniasGestor(gestor);
+  }
+
+  @Get('rutas')
+  async getRutas(@Query('gestor') gestor: string) {
+    return this.portfolioService.getRutasProgramadas(gestor);
+  }
+
+  @Post('rutas')
+  async guardarRutas(@Body() body: { rutas: any[] }) {
+    return this.portfolioService.guardarRutasProgramadas(body.rutas || []);
+  }
+
+  @Delete('rutas/:id')
+  async eliminarRuta(@Param('id') id: string) {
+    return this.portfolioService.eliminarRutaProgramada(id);
+  }
 }
+
