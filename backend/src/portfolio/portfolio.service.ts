@@ -123,15 +123,19 @@ export class PortfolioService {
           ultimo_pago, proximo_vencimiento, telefonos, origen
         )
         SELECT 
-          "NoCUENTA", "NoSOCIO", "NOMBRE", "GESTOR ASIGNADO", "Producto",
+          "NoCUENTA", "NoSOCIO", "NOMBRE", 
+          TRIM(REGEXP_REPLACE("GESTOR ASIGNADO", '^AL CORRIENTE - ', '', 'i')), 
+          "Producto",
           COALESCE("SALDO TOTAL"::numeric, 0), COALESCE("SALDO AL DIA"::numeric, 0), 
-          COALESCE("DIAS MORA"::integer, 0), COALESCE("SITUACIÓN DEL CRÉDITO", 'PREVENTIVA'),
+          COALESCE("DIAS MORA"::integer, 0), COALESCE("SITUACIÓN DEL CRÉDITO", 'AL CORRIENTE'),
           "ULTIMO PAGO", "PRÓXIMO VENCIMIENTO", "TELEFONOS", 'AUTO_SYNC'
         FROM asignacion_gestores
-        WHERE ("SITUACIÓN DEL CRÉDITO" = 'PREVENTIVA' OR "DIAS MORA"::numeric <= 0)
+        WHERE ("SITUACIÓN DEL CRÉDITO" = 'PREVENTIVA' OR "SITUACIÓN DEL CRÉDITO" = 'AL CORRIENTE' OR "DIAS MORA"::numeric <= 0)
         ON CONFLICT (nocuenta, gestor_asignado) DO UPDATE SET
           saldo_total = EXCLUDED.saldo_total,
           saldo_al_dia = EXCLUDED.saldo_al_dia,
+          dias_mora = EXCLUDED.dias_mora,
+          situacion_del_credito = EXCLUDED.situacion_del_credito,
           ultimo_pago = EXCLUDED.ultimo_pago,
           proximo_vencimiento = EXCLUDED.proximo_vencimiento,
           telefonos = EXCLUDED.telefonos,
