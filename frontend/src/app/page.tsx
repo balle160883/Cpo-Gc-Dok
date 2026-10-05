@@ -15,9 +15,10 @@ import {
   TrendingUp,
   DollarSign
 } from "lucide-react";
-import { fetchAsignaciones, fetchRecuperacion, fetchAllGestores, fetchDashboardKpis } from "@/lib/api";
+import { fetchAsignaciones, fetchRecuperacion, fetchAllGestores, fetchDashboardKpis, geocodificarSociosPendientes } from "@/lib/api";
 
 export default function DashboardPage() {
+  const [syncing, setSyncing] = useState(false);
   const [asignaciones, setAsignaciones] = useState<any[]>([]);
   const [recuperacion, setRecuperacion] = useState<any[]>([]);
   const [kpis, setKpis] = useState<{
@@ -382,7 +383,23 @@ export default function DashboardPage() {
                     <p className="text-[9px] text-white/40 font-bold uppercase tracking-tight">Faltan $12,400 para el bono</p>
                   </div>
                   <div className="space-y-4">
-                    <QuickAction title="Sincronizar Datos" desc="Actualizar con el CORE" color="bg-blue-600" />
+                    <QuickAction 
+                      title={syncing ? "Sincronizando..." : "Sincronizar Datos"} 
+                      desc={syncing ? "Geocodificando cartera..." : "Actualizar con el CORE y GPS"} 
+                      color="bg-blue-600" 
+                      onClick={async () => {
+                        try {
+                          setSyncing(true);
+                          await geocodificarSociosPendientes();
+                          alert('✅ Sincronización iniciada: Se están geocodificando y verificando domicilios en segundo plano.');
+                        } catch (e: any) {
+                          alert('Error al sincronizar: ' + (e?.message || e));
+                        } finally {
+                          setSyncing(false);
+                        }
+                      }}
+                      disabled={syncing}
+                    />
                     <QuickAction title="Notificar Socios" desc="Enviar recordatorios" color="bg-emerald-600" />
                     <QuickAction title="Agenda Diaria" desc="Ver mis visitas" color="bg-orange-600" />
                   </div>
@@ -513,9 +530,9 @@ function StatCard({ title, value, icon, trend, trendUp }: any) {
   );
 }
 
-function QuickAction({ title, desc, color }: any) {
+function QuickAction({ title, desc, color, onClick, disabled }: any) {
   return (
-    <button className="w-full text-left group">
+    <button onClick={onClick} disabled={disabled} className="w-full text-left group disabled:opacity-50">
       <div className="flex items-center gap-4 transition-transform active:scale-95">
         <div className={`w-12 h-12 rounded-2xl ${color} flex items-center justify-center font-bold text-lg shadow-lg`}>
           {title.charAt(0)}

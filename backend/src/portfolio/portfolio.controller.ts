@@ -115,5 +115,10 @@ export class PortfolioController {
   async eliminarRuta(@Param('id') id: string) {
     return this.portfolioService.eliminarRutaProgramada(id);
   }
+
+  @Post('geocodificar-pendientes')
+  async geocodificarPendientes() {
+    return this.portfolioService.geocodificarPendientes();
+  }
 }
 

@@ -151,6 +151,16 @@ export async function sincronizarCarteraAlCorriente() {
 
     console.log(`🛡️ Avales resguardados: ${avalesResguardados}`);
     console.log(`🔄 Avales reactivados: ${avalesReactivados}`);
+
+    // 3. Geocodificación automática de socios pendientes (LATITUD/LONGITUD NULL)
+    console.log('📍 Verificando y geocodificando cuentas nuevas sin coordenadas...');
+    try {
+      const { iniciarGeocodificacion } = require('./geocodificar-asignacion');
+      await iniciarGeocodificacion();
+    } catch (geoErr: any) {
+      console.error('⚠️ Advertencia en geocodificación automática:', geoErr?.message || geoErr);
+    }
+
     console.log('✅ Sincronización completada exitosamente.');
 
     return {

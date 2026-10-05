@@ -639,4 +639,21 @@ export class PortfolioService {
       throw err;
     }
   }
+
+  async geocodificarPendientes() {
+    try {
+      const { iniciarGeocodificacion } = require('../../geocodificar-asignacion');
+      // Ejecutar en segundo plano
+      iniciarGeocodificacion().catch((err: any) => {
+        this.logger.error(`Error en proceso de geocodificación: ${err?.message || err}`);
+      });
+      return {
+        success: true,
+        message: 'Proceso de geocodificación de socios sin coordenadas iniciado en segundo plano.'
+      };
+    } catch (err: any) {
+      this.logger.error(`Error al disparar geocodificación: ${err?.message || err}`);
+      return { success: false, error: err?.message || String(err) };
+    }
+  }
 }

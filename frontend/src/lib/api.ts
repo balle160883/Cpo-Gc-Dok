@@ -276,3 +276,16 @@ export async function eliminarRutaProgramada(id: string): Promise<any> {
   return res.json();
 }
 
+export async function geocodificarSociosPendientes(): Promise<any> {
+  const res = await fetch(`${API_URL}/portfolio/geocodificar-pendientes`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...getAuthHeader(),
+    },
+  });
+  if (!res.ok) throw new Error("Error al iniciar geocodificación");
+  return res.json();
+}
+
+
