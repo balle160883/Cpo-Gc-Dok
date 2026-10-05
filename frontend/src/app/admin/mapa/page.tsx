@@ -3,7 +3,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import mapboxgl from 'mapbox-gl';
 import 'mapbox-gl/dist/mapbox-gl.css';
-import { fetchGestoresLocations } from '@/lib/api';
+import { fetchGestoresLocations, fetchAllGestores } from '@/lib/api';
 import { MapPin, User, Clock, Navigation } from 'lucide-react';
 
 // Token de Mapbox (extraído de variables de entorno)
@@ -46,7 +46,30 @@ export default function GestoresMapaPage() {
 
     const updateLocations = async () => {
       try {
-        const data = await fetchGestoresLocations();
+        const [rawLocations, allGestores] = await Promise.all([
+          fetchGestoresLocations(),
+          fetchAllGestores().catch(() => [])
+        ]);
+
+        const gestoresMap = new Map<string, string>();
+        if (Array.isArray(allGestores)) {
+          allGestores.forEach((g: any) => {
+            if (g.gestor_id && g.gestor_name) {
+              gestoresMap.set(g.gestor_id, g.gestor_name);
+            }
+          });
+        }
+
+        const data: GestorLocation[] = (rawLocations || []).map((loc: any) => {
+          const resolvedName = (loc.gestor_name && loc.gestor_name !== 'Gestor')
+            ? loc.gestor_name
+            : (gestoresMap.get(loc.gestor_id) || loc.gestor_name || 'Gestor');
+          return {
+            ...loc,
+            gestor_name: resolvedName
+          };
+        });
+
         setLocations(data);
         
         if (data.length > 0 && map.current) {
@@ -62,8 +85,17 @@ export default function GestoresMapaPage() {
           data.forEach((loc: GestorLocation) => {
             const existingMarker = markers.current.get(loc.gestor_id);
             
+            const popupContent = `
+              <div style="color: #1e293b; padding: 5px;">
+                <h3 style="font-weight: bold; margin-bottom: 5px;">${loc.gestor_name}</h3>
+                <p style="font-size: 12px; margin: 0;">Última conexión:</p>
+                <p style="font-size: 12px; color: #64748b;">${new Date(loc.timestamp).toLocaleString()}</p>
+              </div>
+            `;
+
             if (existingMarker) {
               existingMarker.setLngLat([loc.longitud, loc.latitud]);
+              existingMarker.getPopup()?.setHTML(popupContent);
             } else {
               // Crear un elemento personalizado para el marcador (premium look)
               const el = document.createElement('div');
@@ -81,13 +113,7 @@ export default function GestoresMapaPage() {
               el.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>';
 
               const popup = new mapboxgl.Popup({ offset: 25 })
-                .setHTML(`
-                  <div style="color: #1e293b; padding: 5px;">
-                    <h3 style="font-weight: bold; margin-bottom: 5px;">${loc.gestor_name}</h3>
-                    <p style="font-size: 12px; margin: 0;">Última conexión:</p>
-                    <p style="font-size: 12px; color: #64748b;">${new Date(loc.timestamp).toLocaleString()}</p>
-                  </div>
-                `);
+                .setHTML(popupContent);
 
               const marker = new mapboxgl.Marker(el)
                 .setLngLat([loc.longitud, loc.latitud])

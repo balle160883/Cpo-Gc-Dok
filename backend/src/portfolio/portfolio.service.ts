@@ -358,9 +358,9 @@ export class PortfolioService {
     const { data, error } = await this.supabaseService
       .getClient()
       .from('ubicaciones_gestores')
-      .select('*, usuarios_gestor(gestor)')
+      .select('*')
       .order('timestamp', { ascending: false })
-      .limit(200); // Límite razonable para encontrar la última ubicación de cada gestor sin bajar miles
+      .limit(300); // Límite razonable para encontrar la última ubicación de cada gestor sin bajar miles
 
     if (error) {
       this.logger.error(`Error fetching gestores locations: ${error.message}`);
@@ -371,14 +371,27 @@ export class PortfolioService {
     const uniqueLocations = new Map();
     data?.forEach(loc => {
       if (!uniqueLocations.has(loc.gestor_id)) {
-        uniqueLocations.set(loc.gestor_id, {
-          ...loc,
-          gestor_name: loc.usuarios_gestor?.gestor || 'Gestor'
-        });
+        uniqueLocations.set(loc.gestor_id, loc);
       }
     });
 
-    return Array.from(uniqueLocations.values());
+    // Mapear con los nombres reales de los gestores desde usuarios_gestor
+    const gestoresMap = new Map<string, string>();
+    try {
+      const gestoresList = await this.getAllGestores();
+      gestoresList?.forEach((g: any) => {
+        if (g.gestor_id && g.gestor_name) {
+          gestoresMap.set(g.gestor_id, g.gestor_name);
+        }
+      });
+    } catch (err: any) {
+      this.logger.warn(`No se pudieron cargar nombres de gestores: ${err.message}`);
+    }
+
+    return Array.from(uniqueLocations.values()).map(loc => ({
+      ...loc,
+      gestor_name: gestoresMap.get(loc.gestor_id) || loc.usuarios_gestor?.gestor || 'Gestor'
+    }));
   }
 
   async getAllGestores() {
