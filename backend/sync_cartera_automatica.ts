@@ -52,6 +52,7 @@ export async function sincronizarCarteraAlCorriente() {
     const cuentasParaResguardar: string[] = [];
     const cuentasParaReactivar: string[] = [];
     const cuentasAlCorrienteSet = new Set<string>();
+    const cuentasConMoraActivaSet = new Set<string>();
 
     for (const c of allAccounts) {
       const diasMora = Number(c['DIAS MORA']) || 0;
@@ -64,6 +65,7 @@ export async function sincronizarCarteraAlCorriente() {
           cuentasParaResguardar.push(numCuenta);
         }
       } else {
+        cuentasConMoraActivaSet.add(numCuenta);
         if (gestor.startsWith('AL CORRIENTE - ')) {
           cuentasParaReactivar.push(numCuenta);
         }
@@ -126,9 +128,10 @@ export async function sincronizarCarteraAlCorriente() {
     for (const a of allAvales) {
       const numCuenta = String(a.num_cuenta || '').trim();
       const gestor = String(a.gestor_asignado || '').trim();
-      const cuentaEsAlCorriente = cuentasAlCorrienteSet.has(numCuenta);
+      const tieneMoraActiva = cuentasConMoraActivaSet.has(numCuenta);
 
-      if (cuentaEsAlCorriente) {
+      if (!tieneMoraActiva) {
+        // Titular no tiene mora activa (o tiene 0 días, o está en histórico al corriente, o no está asignado) -> Resguardar
         if (!gestor.startsWith('AL CORRIENTE - ')) {
           const nuevoGestor = `AL CORRIENTE - ${gestor}`;
           await supabase
@@ -138,6 +141,7 @@ export async function sincronizarCarteraAlCorriente() {
           avalesResguardados++;
         }
       } else {
+        // Titular tiene mora activa (> 0 días) -> Reactivar para visita
         if (gestor.startsWith('AL CORRIENTE - ')) {
           const gestorLimpio = gestor.replace(/^AL CORRIENTE - /i, '').trim();
           await supabase

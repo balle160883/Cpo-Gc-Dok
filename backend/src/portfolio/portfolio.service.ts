@@ -566,11 +566,15 @@ export class PortfolioService {
       };
     }
 
-    this.logger.log(`Limpiando tabla asignacion_avales e importando ${assignments.length} registros...`);
+    // 2. Autocompletar Latitud y Longitud INMEDIATAMENTE antes de insertar
+    this.logger.log(`Autocompletando latitud y longitud para ${assignments.length} avales...`);
+    await this.enrichAssignmentsWithCoordinates(assignments);
+
+    this.logger.log(`Limpiando tabla asignacion_avales e importando ${assignments.length} registros con coordenadas...`);
     // Borrar de forma segura ahora que sabemos que tenemos datos listos para insertar
     await this.supabaseService.getClient().from('asignacion_avales').delete().neq('id', '00000000-0000-0000-0000-000000000000');
 
-    // Insertar en lotes
+    // Insertar en lotes en PostgreSQL Dokploy (con latitud y longitud incluidas)
     const batchSize = 100;
     let insertedCount = 0;
     for (let i = 0; i < assignments.length; i += batchSize) {
@@ -583,12 +587,298 @@ export class PortfolioService {
       }
     }
 
+    // Replicar en Supabase Cloud con latitud y longitud
+    try {
+      const cloudClient = this.supabaseService.getCloudClient();
+      if (cloudClient) {
+        this.logger.log(`Sincronizando ${assignments.length} avales con coordenadas a Supabase Cloud...`);
+        await cloudClient.from('asignacion_avales').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+        for (let i = 0; i < assignments.length; i += 200) {
+          const batch = assignments.slice(i, i + 200);
+          const { error: cloudErr } = await cloudClient.from('asignacion_avales').insert(batch);
+          if (cloudErr) {
+            this.logger.error(`Error en lote Supabase Cloud ${i}: ${cloudErr.message}`);
+          }
+        }
+        this.logger.log(`✅ Sincronización de avales a Supabase Cloud finalizada.`);
+      }
+    } catch (cloudErr: any) {
+      this.logger.error(`Error al replicar en Supabase Cloud: ${cloudErr.message}`);
+    }
+
     return {
       success: true,
       totalProcesados: data.length,
       insertados: insertedCount,
       gestoresNoEncontrados: Array.from(unmatchedGestores)
     };
+  }
+
+  async enrichAssignmentsWithCoordinates(assignments: any[]) {
+    try {
+      // 1. Asegurar tabla de catálogo de direcciones en PostgreSQL
+      await this.supabaseService.query(`
+        CREATE TABLE IF NOT EXISTS catalogo_direcciones_geocodificadas (
+          direccion_normalizada TEXT PRIMARY KEY,
+          latitud NUMERIC,
+          longitud NUMERIC,
+          actualizado_al TIMESTAMP DEFAULT NOW()
+        );
+      `);
+
+      // 2. Cargar catálogo existente
+      const resCat = await this.supabaseService.query(
+        'SELECT direccion_normalizada, latitud, longitud FROM catalogo_direcciones_geocodificadas'
+      );
+      const catalog = new Map<string, { lat: number; lng: number }>();
+      for (const row of resCat?.rows || []) {
+        catalog.set(row.direccion_normalizada, {
+          lat: parseFloat(row.latitud),
+          lng: parseFloat(row.longitud)
+        });
+      }
+
+      const clean = (s: string) => (s || '').trim().toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+      const cleanStreet = (dom: string) => {
+        if (!dom) return '';
+        return dom.toUpperCase()
+          .replace(/#/g, '')
+          .replace(/N\.?\s*INT\.?.*/i, '')
+          .replace(/INT\.?.*/i, '')
+          .replace(/\bSN\b/gi, '')
+          .replace(/\bS\/N\b/gi, '')
+          .replace(/DOMICILIO CONOCIDO/gi, '')
+          .replace(/CONOCIDO/gi, '')
+          .replace(/\s+/g, ' ')
+          .trim();
+      };
+
+      const getAddrKey = (a: any) => {
+        return [
+          clean(a.domicilio_aval),
+          clean(a.colonia_aval),
+          clean(a.municipio_aval),
+          clean(a.cp_aval),
+          clean(a.estado_aval || 'JALISCO')
+        ].join('|');
+      };
+
+      // 3. Identificar direcciones pendientes de geocodificar
+      const pendingMap = new Map<string, any>();
+      for (const a of assignments) {
+        const key = getAddrKey(a);
+        if (!catalog.has(key) && !pendingMap.has(key)) {
+          pendingMap.set(key, a);
+        }
+      }
+
+      // 4. Geocodificar las direcciones nuevas (si las hay)
+      const token = process.env.MAPBOX_ACCESS_TOKEN;
+      if (pendingMap.size > 0 && token) {
+        this.logger.log(`Geocodificando ${pendingMap.size} direcciones nuevas con Mapbox...`);
+        const pendingList = Array.from(pendingMap.entries());
+
+        const geocodeQuery = async (q: string): Promise<{ lat: number; lng: number } | null> => {
+          const query = q.trim();
+          if (!query) return null;
+          try {
+            const url = `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(query)}.json?access_token=${token}&limit=1&country=mx`;
+            const resp = await fetch(url);
+            if (resp.ok) {
+              const data: any = await resp.json();
+              if (data.features && data.features.length > 0) {
+                const [lng, lat] = data.features[0].center;
+                return { lat, lng };
+              }
+            }
+          } catch {
+            // ignore
+          }
+          return null;
+        };
+
+        const batchSize = 10;
+        for (let i = 0; i < pendingList.length; i += batchSize) {
+          const chunk = pendingList.slice(i, i + batchSize);
+          await Promise.all(chunk.map(async ([key, a]) => {
+            const street = cleanStreet(a.domicilio_aval || '');
+            const col = (a.colonia_aval || '').trim();
+            const mpo = (a.municipio_aval || '').trim();
+            const edo = (a.estado_aval || 'JALISCO').trim();
+            const cp = (a.cp_aval || '').trim();
+
+            let coords: { lat: number; lng: number } | null = null;
+            if (street) {
+              coords = await geocodeQuery(`${street}, ${col ? col + ', ' : ''}${mpo}, ${edo}, Mexico`);
+            }
+            if (!coords && street && cp) {
+              coords = await geocodeQuery(`${street}, C.P. ${cp}, ${edo}, Mexico`);
+            }
+            if (!coords && col) {
+              coords = await geocodeQuery(`${col}, ${mpo}, ${edo}, Mexico`);
+            }
+            if (!coords && mpo) {
+              coords = await geocodeQuery(`${mpo}, ${edo}, Mexico`);
+            }
+            if (!coords) {
+              coords = { lat: 20.659698, lng: -103.349609 };
+            }
+
+            catalog.set(key, coords);
+            await this.supabaseService.query(`
+              INSERT INTO catalogo_direcciones_geocodificadas (direccion_normalizada, latitud, longitud)
+              VALUES ($1, $2, $3)
+              ON CONFLICT (direccion_normalizada) DO NOTHING
+            `, [key, coords.lat, coords.lng]);
+          }));
+        }
+      }
+
+      // 5. Asignar latitud y longitud a cada aval
+      for (const a of assignments) {
+        const key = getAddrKey(a);
+        const coords = catalog.get(key) || { lat: 20.659698, lng: -103.349609 };
+        a.latitud = coords.lat;
+        a.longitud = coords.lng;
+      }
+
+      this.logger.log(`✅ Coordenadas asignadas a todos los ${assignments.length} registros antes de la inserción.`);
+    } catch (err: any) {
+      this.logger.error(`Error al enriquecer con coordenadas: ${err.message}`);
+      for (const a of assignments) {
+        if (!a.latitud) a.latitud = 20.659698;
+        if (!a.longitud) a.longitud = -103.349609;
+      }
+    }
+  }
+
+  async geocodePendingAvales() {
+    const token = process.env.MAPBOX_ACCESS_TOKEN;
+    if (!token) {
+      this.logger.warn('MAPBOX_ACCESS_TOKEN no configurado. Se omite geocodificación automática.');
+      return;
+    }
+
+    try {
+      this.logger.log('Iniciando geocodificación de avales pendientes...');
+      const res = await this.supabaseService.query(`
+        SELECT id, domicilio_aval, colonia_aval, municipio_aval, estado_aval, cp_aval
+        FROM asignacion_avales
+        WHERE latitud IS NULL OR latitud = '' OR longitud IS NULL OR longitud = ''
+        LIMIT 3500;
+      `);
+
+      const rows = res?.rows || [];
+      if (rows.length === 0) {
+        this.logger.log('No hay avales pendientes de geocodificación.');
+        return;
+      }
+
+      this.logger.log(`Geocodificando ${rows.length} avales...`);
+      const cache = new Map<string, { lat: number; lng: number }>();
+
+      const cleanStreet = (dom: string) => {
+        if (!dom) return '';
+        return dom.toUpperCase()
+          .replace(/#/g, '')
+          .replace(/N\.?\s*INT\.?.*/i, '')
+          .replace(/INT\.?.*/i, '')
+          .replace(/\bSN\b/gi, '')
+          .replace(/\bS\/N\b/gi, '')
+          .replace(/DOMICILIO CONOCIDO/gi, '')
+          .replace(/CONOCIDO/gi, '')
+          .replace(/\s+/g, ' ')
+          .trim();
+      };
+
+      const geocodeQuery = async (q: string): Promise<{ lat: number; lng: number } | null> => {
+        const query = q.trim();
+        if (!query) return null;
+        if (cache.has(query)) return cache.get(query) || null;
+
+        try {
+          const url = `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(query)}.json?access_token=${token}&limit=1&country=mx`;
+          const resp = await fetch(url);
+          if (resp.ok) {
+            const data: any = await resp.json();
+            if (data.features && data.features.length > 0) {
+              const [lng, lat] = data.features[0].center;
+              const coords = { lat, lng };
+              cache.set(query, coords);
+              return coords;
+            }
+          }
+        } catch {
+          // ignorar error individual
+        }
+        cache.set(query, null as any);
+        return null;
+      };
+
+      const geocodeRow = async (row: any) => {
+        const street = cleanStreet(row.domicilio_aval || '');
+        const col = (row.colonia_aval || '').trim();
+        const mpo = (row.municipio_aval || '').trim();
+        const edo = (row.estado_aval || 'JALISCO').trim();
+        const cp = (row.cp_aval || '').trim();
+
+        if (street) {
+          const q1 = `${street}, ${col ? col + ', ' : ''}${mpo}, ${edo}, Mexico`;
+          const c1 = await geocodeQuery(q1);
+          if (c1) return c1;
+        }
+        if (street && cp) {
+          const q2 = `${street}, C.P. ${cp}, ${edo}, Mexico`;
+          const c2 = await geocodeQuery(q2);
+          if (c2) return c2;
+        }
+        if (col) {
+          const q3 = `${col}, ${mpo}, ${edo}, Mexico`;
+          const c3 = await geocodeQuery(q3);
+          if (c3) return c3;
+        }
+        if (mpo) {
+          const q4 = `${mpo}, ${edo}, Mexico`;
+          const c4 = await geocodeQuery(q4);
+          if (c4) return c4;
+        }
+        return { lat: 20.659698, lng: -103.349609 };
+      };
+
+      const batchSize = 10;
+      for (let i = 0; i < rows.length; i += batchSize) {
+        const chunk = rows.slice(i, i + batchSize);
+        await Promise.all(chunk.map(async (row: any) => {
+          const coords = await geocodeRow(row);
+          if (coords) {
+            await this.supabaseService.query(
+              'UPDATE asignacion_avales SET latitud = $1, longitud = $2 WHERE id = $3',
+              [String(coords.lat), String(coords.lng), row.id]
+            );
+          }
+        }));
+      }
+
+      this.logger.log('✅ Geocodificación en PostgreSQL completada. Sincronizando con Supabase Cloud...');
+      const cloudClient = this.supabaseService.getCloudClient();
+      if (cloudClient) {
+        const allRes = await this.supabaseService.query(`
+          SELECT num_cuenta, nombre_aval, domicilio_aval, colonia_aval, municipio_aval, cp_aval,
+                 cruces_aval, estado_aval, telefono_aval, gestor_asignado, tipo_aval,
+                 latitud::numeric, longitud::numeric
+          FROM asignacion_avales;
+        `);
+        const allRows = allRes?.rows || [];
+        await cloudClient.from('asignacion_avales').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+        for (let i = 0; i < allRows.length; i += 200) {
+          const batch = allRows.slice(i, i + 200);
+          await cloudClient.from('asignacion_avales').insert(batch);
+        }
+        this.logger.log('✅ Coordenadas de avales sincronizadas al 100% en Supabase Cloud.');
+      }
+    } catch (err: any) {
+      this.logger.error(`Error en geocodePendingAvales: ${err.message}`);
+    }
   }
 
   async getColoniasGestor(gestor: string) {

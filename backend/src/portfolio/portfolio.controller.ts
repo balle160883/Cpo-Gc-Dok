@@ -96,6 +96,14 @@ export class PortfolioController {
     return this.portfolioService.importAvales(file.buffer);
   }
 
+  @Post('geocode-avales')
+  async geocodeAvales() {
+    this.portfolioService.geocodePendingAvales().catch(err => {
+      console.error('Error al geocodificar avales:', err);
+    });
+    return { success: true, message: 'Geocodificación de avales iniciada en segundo plano' };
+  }
+
   @Get('colonias')
   async getColonias(@Query('gestor') gestor: string) {
     return this.portfolioService.getColoniasGestor(gestor);
