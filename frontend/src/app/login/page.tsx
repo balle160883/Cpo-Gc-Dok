@@ -16,8 +16,12 @@ export default function LoginPage() {
     setLoading(true);
     setError('');
     try {
-      await login(email, password);
-      router.push('/');
+      const data = await login(email, password);
+      if (data?.user?.rol?.toLowerCase() === 'telefonista') {
+        router.push('/gestiones');
+      } else {
+        router.push('/');
+      }
     } catch (err: any) {
       setError(err.message || 'Error al iniciar sesión');
     } finally {

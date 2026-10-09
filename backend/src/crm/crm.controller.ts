@@ -34,9 +34,14 @@ export class CrmController {
     @Query('endDate') endDate?: string,
     @Query('search') search?: string
   ) {
-    const rawGestorId = req.user.rol === 'admin' ? gestorId : req.user.gestorId;
+    const isTelefonista = req.user.rol?.toLowerCase() === 'telefonista';
+    const rawGestorId = (req.user.rol === 'admin' || isTelefonista) ? gestorId : req.user.gestorId;
     const effectiveGestorId = (rawGestorId && rawGestorId.trim() !== '') ? rawGestorId : undefined;
-    return this.crmService.getInteracciones(effectiveGestorId, startDate, endDate, search);
+    const data = await this.crmService.getInteracciones(effectiveGestorId, startDate, endDate, search);
+    if (isTelefonista) {
+      return (data || []).filter((item: any) => item.tipo_gestion !== 'Visita');
+    }
+    return data;
   }
 
   @Get('promesas/pendientes')

@@ -63,6 +63,10 @@ export default function DashboardPage() {
 
     try {
       const parsedUser = JSON.parse(userInfo);
+      if (parsedUser.rol?.toLowerCase() === 'telefonista') {
+        router.replace('/gestiones');
+        return;
+      }
       setUser(parsedUser);
       const admin = parsedUser.rol === 'admin';
       setIsAdmin(admin);

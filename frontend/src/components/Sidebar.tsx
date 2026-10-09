@@ -22,6 +22,7 @@ export function Sidebar({ isOpen, onClose }: { isOpen?: boolean, onClose?: () =>
   const [isMounted, setIsMounted] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
   const [isSuperAdmin, setIsSuperAdmin] = useState(false);
+  const [isTelefonista, setIsTelefonista] = useState(false);
 
   useEffect(() => {
     setIsMounted(true);
@@ -44,6 +45,7 @@ export function Sidebar({ isOpen, onClose }: { isOpen?: boolean, onClose?: () =>
         
         setIsAdmin(isAdminUser);
         setIsSuperAdmin(superRole);
+        setIsTelefonista(user.rol?.toLowerCase() === 'telefonista');
       } catch (e) {
         console.error("Error parsing user info", e);
       }
@@ -102,7 +104,9 @@ export function Sidebar({ isOpen, onClose }: { isOpen?: boolean, onClose?: () =>
           </div>
           
           <nav className="flex-1 mt-6 overflow-y-auto">
-            {menuItems.map((item, index) => {
+            {menuItems
+              .filter((item) => (isTelefonista ? item.href === '/gestiones' : true))
+              .map((item, index) => {
               if (item.adminOnly && !isAdmin) return null;
               if (item.superOnly && !isSuperAdmin) return null;
               
@@ -121,7 +125,7 @@ export function Sidebar({ isOpen, onClose }: { isOpen?: boolean, onClose?: () =>
                     <span className="font-medium">{item.label}</span>
                   </Link>
                   
-                  {index === 0 && isAdmin && (
+                  {index === 0 && isAdmin && !isTelefonista && (
                     <Link 
                       href="/admin/mapa"
                       onClick={onClose}

@@ -36,7 +36,8 @@ export class PortfolioController {
     @Query('limit') limit: number,
     @Query('gestorId') gestorId?: string,
   ) {
-    const rawGestorId = req.user.rol === 'admin' ? gestorId : (gestorId || req.user.gestorId);
+    const isTelefonista = req.user.rol?.toLowerCase() === 'telefonista';
+    const rawGestorId = (req.user.rol === 'admin' || isTelefonista) ? gestorId : (gestorId || req.user.gestorId);
     const effectiveGestorId = (rawGestorId && rawGestorId.trim() !== '') ? rawGestorId : undefined;
     return this.portfolioService.getAsignaciones(limit, effectiveGestorId);
   }

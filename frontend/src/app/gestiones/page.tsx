@@ -12,6 +12,7 @@ export default function GestionesPage() {
   const [loading, setLoading] = useState(true);
   const [user, setUser] = useState<any>(null);
   const [isAdmin, setIsAdmin] = useState(false);
+  const [isTelefonista, setIsTelefonista] = useState(false);
   const [gestores, setGestores] = useState<any[]>([]);
   const [selectedGestor, setSelectedGestor] = useState<string>("");
   const [selectedType, setSelectedType] = useState<GestionType>('Todas');
@@ -62,6 +63,10 @@ export default function GestionesPage() {
       const parsedUser = JSON.parse(userInfo);
       setUser(parsedUser);
       setIsAdmin(parsedUser.rol === 'admin');
+      if (parsedUser.rol?.toLowerCase() === 'telefonista') {
+        setIsTelefonista(true);
+        setSelectedType('Llamada');
+      }
     }
   }, []);
 
@@ -69,13 +74,13 @@ export default function GestionesPage() {
   useEffect(() => {
     if (isGestionModalOpen && user) {
       setLoadingAsignaciones(true);
-      const effectiveGestor = isAdmin ? "" : user.gestor;
-      fetchAsignaciones(300, effectiveGestor)
+      const effectiveGestor = (isAdmin || isTelefonista) ? "" : user.gestor;
+      fetchAsignaciones(1000, effectiveGestor)
         .then(setAsignacionesList)
         .catch(console.error)
         .finally(() => setLoadingAsignaciones(false));
     }
-  }, [isGestionModalOpen, user, isAdmin]);
+  }, [isGestionModalOpen, user, isAdmin, isTelefonista]);
 
   const filteredSocios = asignacionesList.filter(asig => {
     const term = searchSocioTerm.toLowerCase();
@@ -224,8 +229,9 @@ export default function GestionesPage() {
   };
 
   const handleExportExcel = () => {
-    if (!filteredInteracciones || filteredInteracciones.length === 0) return;
-    const dataToExport = filteredInteracciones.map(item => {
+    const listToExport = filteredInteracciones.filter(item => !isTelefonista || item.tipo_gestion !== 'Visita');
+    if (!listToExport || listToExport.length === 0) return;
+    const dataToExport = listToExport.map(item => {
       const sujetoExcel = getSujetoEfectivo(item);
       const esAvalExcel = sujetoExcel.startsWith('Aval');
       return {
@@ -268,7 +274,10 @@ export default function GestionesPage() {
 
   // Filtrar interacciones por tipo, sujeto, resultado y término de búsqueda
   const filteredInteracciones = interacciones.filter(item => {
-    const matchesType = selectedType === 'Todas' || item.tipo_gestion === selectedType;
+    if (isTelefonista && item.tipo_gestion === 'Visita') return false;
+    const matchesType = selectedType === 'Todas' 
+      ? (!isTelefonista || item.tipo_gestion !== 'Visita')
+      : item.tipo_gestion === selectedType;
     const sujetoEfectivo = getSujetoEfectivo(item);
     const matchesSujeto = selectedSujeto === 'Todos' || sujetoEfectivo === selectedSujeto;
     const matchesResultado = selectedResultado === 'Todos' || item.resultado === selectedResultado;
@@ -304,19 +313,30 @@ export default function GestionesPage() {
     }
   };
 
-  const tabs: {id: GestionType, label: string}[] = [
-    { id: 'Todas', label: 'Todas' },
-    { id: 'Llamada', label: 'Llamadas' },
-    { id: 'Visita', label: 'Visitas' },
-    { id: 'Mensaje', label: 'Mensajes' }
-  ];
+  const tabs: {id: GestionType, label: string}[] = isTelefonista
+    ? [
+        { id: 'Llamada', label: 'Llamadas' },
+        { id: 'Mensaje', label: 'Mensajes' }
+      ]
+    : [
+        { id: 'Todas', label: 'Todas' },
+        { id: 'Llamada', label: 'Llamadas' },
+        { id: 'Visita', label: 'Visitas' },
+        { id: 'Mensaje', label: 'Mensajes' }
+      ];
 
   return (
     <div className="space-y-6">
       <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-slate-900">Historial de Gestiones</h1>
-          <p className="text-slate-500 text-sm">Registro cronológico de actividades de cobranza y contacto en campo.</p>
+          <h1 className="text-2xl font-bold text-slate-900">
+            {isTelefonista ? 'Gestión Telefónica de Cobranza' : 'Historial de Gestiones'}
+          </h1>
+          <p className="text-slate-500 text-sm">
+            {isTelefonista 
+              ? 'Panel exclusivo de llamadas y seguimiento telefónico a socios y avales.' 
+              : 'Registro cronológico de actividades de cobranza y contacto en campo.'}
+          </p>
         </div>
         
         <div className="flex flex-wrap items-center gap-3 w-full lg:w-auto">

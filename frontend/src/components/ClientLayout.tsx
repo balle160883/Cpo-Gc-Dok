@@ -1,7 +1,7 @@
 'use client';
 
 import dynamic from 'next/dynamic';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import { useState, useEffect } from 'react';
 import { Sidebar } from "@/components/Sidebar";
 import { Header } from "@/components/Header";
@@ -9,8 +9,25 @@ import { Header } from "@/components/Header";
 // Componente interno que maneja el layout real
 function LayoutContent({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+  const router = useRouter();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const isLoginPage = pathname === '/login';
+
+  useEffect(() => {
+    const userInfo = localStorage.getItem('user_info');
+    if (userInfo) {
+      try {
+        const user = JSON.parse(userInfo);
+        if (user.rol?.toLowerCase() === 'telefonista') {
+          if (pathname !== '/gestiones' && pathname !== '/login') {
+            router.replace('/gestiones');
+          }
+        }
+      } catch (e) {
+        console.error("Error validando rol de usuario:", e);
+      }
+    }
+  }, [pathname, router]);
 
   return (
     <div className="flex h-screen overflow-hidden bg-slate-50">
