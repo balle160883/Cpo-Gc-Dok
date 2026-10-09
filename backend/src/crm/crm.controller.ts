@@ -31,11 +31,12 @@ export class CrmController {
     @Request() req: any, 
     @Query('gestorId') gestorId?: string,
     @Query('startDate') startDate?: string,
-    @Query('endDate') endDate?: string
+    @Query('endDate') endDate?: string,
+    @Query('search') search?: string
   ) {
     const rawGestorId = req.user.rol === 'admin' ? gestorId : req.user.gestorId;
     const effectiveGestorId = (rawGestorId && rawGestorId.trim() !== '') ? rawGestorId : undefined;
-    return this.crmService.getInteracciones(effectiveGestorId, startDate, endDate);
+    return this.crmService.getInteracciones(effectiveGestorId, startDate, endDate, search);
   }
 
   @Get('promesas/pendientes')

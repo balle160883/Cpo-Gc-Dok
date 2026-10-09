@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { MessageSquare, Calendar, Phone, MapPin, CheckCircle2, Loader2, User, FileDown, Plus, X, ChevronLeft, ChevronRight, CalendarDays } from "lucide-react";
+import { useEffect, useState, useCallback } from "react";
+import { MessageSquare, Calendar, Phone, MapPin, CheckCircle2, Loader2, User, FileDown, Plus, X, ChevronLeft, ChevronRight, CalendarDays, Search, History } from "lucide-react";
 import { fetchInteracciones, fetchAllGestores, registrarInteraccion, fetchAsignaciones } from "@/lib/api";
 import * as XLSX from 'xlsx';
 
@@ -15,6 +15,10 @@ export default function GestionesPage() {
   const [gestores, setGestores] = useState<any[]>([]);
   const [selectedGestor, setSelectedGestor] = useState<string>("");
   const [selectedType, setSelectedType] = useState<GestionType>('Todas');
+  
+  // Búsqueda por Cuenta / Socio / Nombre y Modo Todo el Histórico
+  const [searchTerm, setSearchTerm] = useState("");
+  const [buscarEnTodoHistorico, setBuscarEnTodoHistorico] = useState(false);
   
   // Modo de visualización: 'dia' (por día, ultra rápido) o 'rango' (periodo personalizado)
   const [viewMode, setViewMode] = useState<'dia' | 'rango'>('dia');
@@ -166,23 +170,28 @@ export default function GestionesPage() {
     return uniqueData;
   };
 
-  useEffect(() => {
-    async function loadData() {
-      setLoading(true);
-      try {
-        const effectiveStart = viewMode === 'dia' ? currentDay : startDate;
-        const effectiveEnd = viewMode === 'dia' ? currentDay : endDate;
-        const data = await fetchInteracciones(selectedGestor, effectiveStart, effectiveEnd);
-        setInteracciones(deduplicateInteraccionesFrontend(data));
-        setCurrentPage(1);
-      } catch (error) {
-        console.error("Error loading interactions:", error);
-      } finally {
-        setLoading(false);
-      }
+  const loadData = useCallback(async (customSearch?: string, customHistorico?: boolean) => {
+    setLoading(true);
+    try {
+      const isHistorico = customHistorico !== undefined ? customHistorico : buscarEnTodoHistorico;
+      const effectiveStart = isHistorico ? undefined : (viewMode === 'dia' ? currentDay : startDate);
+      const effectiveEnd = isHistorico ? undefined : (viewMode === 'dia' ? currentDay : endDate);
+      const term = customSearch !== undefined ? customSearch : searchTerm;
+      const effectiveSearch = term.trim() ? term.trim() : undefined;
+
+      const data = await fetchInteracciones(selectedGestor, effectiveStart, effectiveEnd, effectiveSearch);
+      setInteracciones(deduplicateInteraccionesFrontend(data));
+      setCurrentPage(1);
+    } catch (error) {
+      console.error("Error loading interactions:", error);
+    } finally {
+      setLoading(false);
     }
+  }, [selectedGestor, viewMode, currentDay, startDate, endDate, buscarEnTodoHistorico, searchTerm]);
+
+  useEffect(() => {
     loadData();
-  }, [selectedGestor, viewMode, currentDay, startDate, endDate]);
+  }, [selectedGestor, viewMode, currentDay, startDate, endDate, buscarEnTodoHistorico]);
 
   const handlePrevDay = () => {
     const parts = currentDay.split('-').map(Number);
@@ -239,8 +248,10 @@ export default function GestionesPage() {
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, "Gestiones");
     
-    // Generar nombre de archivo con fecha
-    const fileSuffix = viewMode === 'dia' ? currentDay : `${startDate || 'Inicio'}_al_${endDate || 'Fin'}`;
+    // Generar nombre de archivo con fecha o búsqueda
+    const fileSuffix = buscarEnTodoHistorico
+      ? `Historico_${searchTerm.trim().replace(/[^a-zA-Z0-9_-]/g, '_') || 'General'}`
+      : (viewMode === 'dia' ? currentDay : `${startDate || 'Inicio'}_al_${endDate || 'Fin'}`);
     const fileName = `Gestiones_${fileSuffix}_${new Date().toISOString().split('T')[0]}.xlsx`;
     XLSX.writeFile(workbook, fileName);
   };
@@ -255,13 +266,26 @@ export default function GestionesPage() {
     return rawSujeto;
   };
 
-  // Filtrar interacciones por tipo y sujeto en el frontend
+  // Filtrar interacciones por tipo, sujeto, resultado y término de búsqueda
   const filteredInteracciones = interacciones.filter(item => {
     const matchesType = selectedType === 'Todas' || item.tipo_gestion === selectedType;
     const sujetoEfectivo = getSujetoEfectivo(item);
     const matchesSujeto = selectedSujeto === 'Todos' || sujetoEfectivo === selectedSujeto;
     const matchesResultado = selectedResultado === 'Todos' || item.resultado === selectedResultado;
-    return matchesType && matchesSujeto && matchesResultado;
+
+    const term = searchTerm.toLowerCase().trim();
+    const matchesSearch = !term || (
+      (item.num_cuenta && item.num_cuenta.toLowerCase().includes(term)) ||
+      (item.asignacion?.NoCUENTA && item.asignacion.NoCUENTA.toLowerCase().includes(term)) ||
+      (item.socio_id && String(item.socio_id).toLowerCase().includes(term)) ||
+      (item.socios_datos?.nombre_completo && item.socios_datos.nombre_completo.toLowerCase().includes(term)) ||
+      (item.asignacion?.NOMBRE && item.asignacion.NOMBRE.toLowerCase().includes(term)) ||
+      (item.nombre_visitado && item.nombre_visitado.toLowerCase().includes(term)) ||
+      (item.descripcion && item.descripcion.toLowerCase().includes(term)) ||
+      (item.usuarios_gestor?.gestor && item.usuarios_gestor.gestor.toLowerCase().includes(term))
+    );
+
+    return matchesType && matchesSujeto && matchesResultado && matchesSearch;
   });
 
   // Paginación interna
@@ -404,6 +428,56 @@ export default function GestionesPage() {
             </select>
           </div>
 
+          {/* Buscador Rápido por Crédito / Socio */}
+          <div className="relative flex items-center min-w-[220px] lg:min-w-[280px]">
+            <Search size={16} className="absolute left-3 text-slate-400 pointer-events-none" />
+            <input 
+              type="text" 
+              placeholder="No. Cuenta, Socio o Nombre..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  loadData(searchTerm, buscarEnTodoHistorico);
+                }
+              }}
+              className="w-full pl-9 pr-8 py-2 bg-white rounded-xl border border-slate-200 text-xs font-bold text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20 shadow-sm"
+            />
+            {searchTerm && (
+              <button 
+                onClick={() => { 
+                  setSearchTerm(''); 
+                  if (buscarEnTodoHistorico) {
+                    setBuscarEnTodoHistorico(false);
+                    loadData('', false);
+                  }
+                }}
+                className="absolute right-2.5 p-1 text-slate-400 hover:text-slate-600 rounded-lg"
+                title="Limpiar búsqueda"
+              >
+                <X size={14} />
+              </button>
+            )}
+          </div>
+
+          {/* Botón para alternar búsqueda en Todo el Histórico */}
+          <button
+            onClick={() => {
+              const nextVal = !buscarEnTodoHistorico;
+              setBuscarEnTodoHistorico(nextVal);
+              loadData(searchTerm, nextVal);
+            }}
+            className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold transition-all border shadow-sm ${
+              buscarEnTodoHistorico
+                ? "bg-blue-600 text-white border-blue-600 shadow-blue-200"
+                : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"
+            }`}
+            title="Consultar todas las visitas históricas de este cliente sin importar la fecha"
+          >
+            <History size={14} />
+            <span>{buscarEnTodoHistorico ? "Viendo Todo el Histórico" : "Todo el Histórico"}</span>
+          </button>
+
           <button 
             onClick={() => setIsGestionModalOpen(true)}
             className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2.5 rounded-xl text-xs font-bold transition-all shadow-sm hover:shadow-md"
@@ -455,6 +529,70 @@ export default function GestionesPage() {
           ))}
         </div>
       </div>
+
+      {/* Banner Informativo cuando hay Búsqueda Activa */}
+      {searchTerm.trim() && (
+        <div className="bg-blue-50/90 border border-blue-200 rounded-2xl p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-sm animate-in fade-in">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-blue-600 text-white flex items-center justify-center font-bold shrink-0 shadow-sm">
+              <Search size={18} />
+            </div>
+            <div>
+              <div className="text-xs font-extrabold text-blue-950 flex flex-wrap items-center gap-1.5">
+                Búsqueda activa de visitas:
+                <span className="bg-white px-2 py-0.5 rounded-lg border border-blue-200 text-blue-700 font-black">
+                  "{searchTerm}"
+                </span>
+                <span className="text-blue-600 font-bold ml-1">
+                  ({filteredInteracciones.length} gestiones encontradas)
+                </span>
+              </div>
+              <div className="text-[11px] text-blue-700/80 font-medium mt-0.5">
+                {buscarEnTodoHistorico 
+                  ? "Mostrando el histórico COMPLETO de todas las visitas registradas para este cliente en la base de datos." 
+                  : `Filtrando únicamente dentro de ${viewMode === 'dia' ? 'la fecha ' + currentDay : 'el rango seleccionado'}. Si deseas consultar visitas de fechas anteriores, pulsa "Buscar en Todo el Histórico".`}
+              </div>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
+            {!buscarEnTodoHistorico ? (
+              <button
+                onClick={() => {
+                  setBuscarEnTodoHistorico(true);
+                  loadData(searchTerm, true);
+                }}
+                className="bg-blue-600 hover:bg-blue-700 text-white px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all shadow-sm hover:shadow flex items-center gap-1.5"
+              >
+                <History size={13} />
+                Buscar en Todo el Histórico
+              </button>
+            ) : (
+              <button
+                onClick={() => {
+                  setBuscarEnTodoHistorico(false);
+                  loadData(searchTerm, false);
+                }}
+                className="bg-white hover:bg-slate-50 text-blue-700 border border-blue-300 px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all shadow-sm flex items-center gap-1.5"
+              >
+                <Calendar size={13} />
+                Volver a filtro por fecha
+              </button>
+            )}
+            <button
+              onClick={() => {
+                setSearchTerm('');
+                if (buscarEnTodoHistorico) {
+                  setBuscarEnTodoHistorico(false);
+                  loadData('', false);
+                }
+              }}
+              className="text-slate-500 hover:text-slate-800 text-xs font-bold px-2.5 py-1.5 rounded-lg hover:bg-blue-100/50 transition-colors"
+            >
+              Limpiar Filtro
+            </button>
+          </div>
+        </div>
+      )}
 
       {loading ? (
         <div className="py-20 flex flex-col items-center justify-center text-slate-400">

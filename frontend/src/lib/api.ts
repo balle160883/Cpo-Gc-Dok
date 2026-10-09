@@ -166,7 +166,7 @@ export async function registrarInteraccion(data: any) {
   return res.json();
 }
 
-export async function fetchInteracciones(gestorId?: string, startDate?: string, endDate?: string): Promise<any[]> {
+export async function fetchInteracciones(gestorId?: string, startDate?: string, endDate?: string, search?: string): Promise<any[]> {
   const headers = getAuthHeader();
   let url = `${API_URL}/crm/interacciones?`;
   
@@ -174,6 +174,7 @@ export async function fetchInteracciones(gestorId?: string, startDate?: string, 
   if (gestorId) params.append('gestorId', gestorId);
   if (startDate) params.append('startDate', startDate);
   if (endDate) params.append('endDate', endDate);
+  if (search && search.trim()) params.append('search', search.trim());
     
   const response = await fetch(url + params.toString(), { headers });
   if (!response.ok) throw new Error("Failed to fetch interactions");

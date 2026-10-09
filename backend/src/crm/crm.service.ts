@@ -343,7 +343,7 @@ export class CrmService {
     return this._mapInteraccionesConAsignacion(uniqueData);
   }
 
-  async getInteracciones(gestorId?: string, startDate?: string, endDate?: string) {
+  async getInteracciones(gestorId?: string, startDate?: string, endDate?: string, search?: string) {
     let resolvedGestorId = gestorId;
     if (gestorId && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(gestorId)) {
       const { data: gData } = await this.supabaseService.getClient()
@@ -352,6 +352,26 @@ export class CrmService {
         .ilike('gestor', `%${gestorId.trim()}%`)
         .limit(1);
       resolvedGestorId = gData && gData.length > 0 ? gData[0].id : '00000000-0000-0000-0000-000000000000';
+    }
+
+    let matchingCuentasFromNames: string[] = [];
+    if (search && search.trim()) {
+      const term = search.trim();
+      if (/[a-zA-Z]/.test(term)) {
+        try {
+          const resNames = await this.supabaseService.query(
+            `SELECT "NoCUENTA" FROM asignacion_gestores 
+             WHERE "NOMBRE" ILIKE $1 OR "NOMBRE D.A.1" ILIKE $1 OR "NOMBRE D.A.2" ILIKE $1 
+             LIMIT 100;`,
+            [`%${term}%`]
+          );
+          if (resNames?.rows?.length > 0) {
+            matchingCuentasFromNames = resNames.rows.map((r: any) => r.NoCUENTA).filter(Boolean);
+          }
+        } catch (e: any) {
+          this.logger.warn(`Error resolving names for search: ${e.message}`);
+        }
+      }
     }
 
     // Lógica de Paginación Automática para superar el límite de 1,000 de Postgrest/Supabase
@@ -372,6 +392,15 @@ export class CrmService {
       if (resolvedGestorId) paginatedQuery = paginatedQuery.eq('gestor_id', resolvedGestorId);
       if (startDate) paginatedQuery = paginatedQuery.gte('fecha_gestion', this._toUTCStartOfDay(startDate));
       if (endDate) paginatedQuery = paginatedQuery.lte('fecha_gestion', this._toUTCEndOfDay(endDate));
+      if (search && search.trim()) {
+        const cleanTerm = search.trim();
+        if (matchingCuentasFromNames.length > 0) {
+          const cuentasCond = matchingCuentasFromNames.slice(0, 30).map(c => `num_cuenta.eq.${c}`).join(',');
+          paginatedQuery = paginatedQuery.or(`num_cuenta.ilike.%${cleanTerm}%,socio_id.ilike.%${cleanTerm}%,${cuentasCond}`);
+        } else {
+          paginatedQuery = paginatedQuery.or(`num_cuenta.ilike.%${cleanTerm}%,socio_id.ilike.%${cleanTerm}%`);
+        }
+      }
 
 
       const { data: pageData, error } = await paginatedQuery;
