@@ -269,16 +269,34 @@ export default function AdminGestoresPage() {
     }
 
     setDeletingGestor(gestor);
-    setReassignOption('unassign');
     // Preseleccionar otro gestor de campo si existe
     const available = gestores.find(g => g.id !== gestor.id && g.rol === 'gestor');
     setTargetReassignGestor(available ? available.gestor : '');
+
+    // Si es un admin normal y el gestor tiene cuentas asignadas, obligatoriamente 'reassign'
+    if (!isMasterOrSuper && (gestor.cuentas_asignadas || 0) > 0) {
+      setReassignOption('reassign');
+    } else {
+      setReassignOption('unassign');
+    }
+
     setShowDeleteModal(true);
   };
 
   // Confirmar eliminación
   const handleConfirmDelete = async () => {
     if (!deletingGestor) return;
+
+    // Validación obligatoria para rol admin si el gestor tiene cuentas
+    if (!isMasterOrSuper && (deletingGestor.cuentas_asignadas || 0) > 0) {
+      if (!targetReassignGestor || targetReassignGestor.trim() === '') {
+        setFeedback({
+          type: 'error',
+          message: 'Como Administrador, es obligatorio seleccionar un gestor activo para transferirle la cartera.'
+        });
+        return;
+      }
+    }
 
     setDeleting(true);
     try {
@@ -850,52 +868,94 @@ export default function AdminGestoresPage() {
               {deletingGestor.cuentas_asignadas > 0 ? (
                 <div className="p-4 rounded-xl bg-amber-500/10 border border-amber-500/20 space-y-3">
                   <div className="flex items-center gap-2 text-amber-400 font-semibold text-xs">
-                    <AlertTriangle className="w-4 h-4" />
+                    <AlertTriangle className="w-4 h-4 flex-shrink-0" />
                     <span>Este gestor tiene {deletingGestor.cuentas_asignadas} cuentas asignadas activas</span>
                   </div>
 
-                  <p className="text-xs text-slate-300">
-                    Elige qué deseas hacer con sus cuentas asignadas para no dejar cartera desatendida:
-                  </p>
+                  {!isMasterOrSuper ? (
+                    // Obligatorio para rol Admin regular
+                    <div className="space-y-3 pt-1">
+                      <div className="p-3 bg-slate-950/80 rounded-xl border border-amber-500/30 text-xs text-amber-300">
+                        <p className="font-bold mb-1 flex items-center gap-1.5">
+                          <span>⚠️ Requisito de Administrador:</span>
+                        </p>
+                        <p className="text-slate-300">
+                          Para evitar cartera desatendida, es <strong>obligatorio</strong> reasignar todas las cuentas de este gestor a otro gestor activo antes de poder eliminarlo.
+                        </p>
+                      </div>
 
-                  <div className="space-y-2">
-                    <label className="flex items-center gap-2 text-xs text-slate-300 cursor-pointer">
-                      <input
-                        type="radio"
-                        name="reassign_opt"
-                        checked={reassignOption === 'unassign'}
-                        onChange={() => setReassignOption('unassign')}
-                        className="text-blue-600 focus:ring-0"
-                      />
-                      <span>Dejar cuentas en estado <strong>&quot;SIN ASIGNAR&quot;</strong></span>
-                    </label>
+                      <div>
+                        <label className="block text-xs font-bold text-slate-300 mb-1.5 uppercase tracking-wider">
+                          Reasignar cartera a otro gestor:
+                        </label>
+                        <select
+                          value={targetReassignGestor}
+                          onChange={(e) => setTargetReassignGestor(e.target.value)}
+                          className="w-full bg-slate-950 border border-amber-500/40 rounded-xl px-3 py-2.5 text-xs text-white focus:outline-none focus:ring-1 focus:ring-amber-500"
+                        >
+                          <option value="">-- Selecciona el gestor receptor --</option>
+                          {gestores
+                            .filter((g) => g.id !== deletingGestor.id && g.rol === 'gestor')
+                            .map((g) => (
+                              <option key={g.id} value={g.gestor}>
+                                {g.gestor} ({g.cuentas_asignadas} cuentas actuales)
+                              </option>
+                            ))}
+                        </select>
+                        {!targetReassignGestor && (
+                          <p className="text-[11px] text-red-400 font-semibold mt-1.5">
+                            * Debes seleccionar un gestor para habilitar la eliminación.
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  ) : (
+                    // Opciones para Administrador Principal / Superadmin
+                    <div className="space-y-3">
+                      <p className="text-xs text-slate-300">
+                        Elige qué deseas hacer con sus cuentas asignadas para no dejar cartera desatendida:
+                      </p>
 
-                    <label className="flex items-center gap-2 text-xs text-slate-300 cursor-pointer">
-                      <input
-                        type="radio"
-                        name="reassign_opt"
-                        checked={reassignOption === 'reassign'}
-                        onChange={() => setReassignOption('reassign')}
-                        className="text-blue-600 focus:ring-0"
-                      />
-                      <span>Reasignar cartera a otro gestor activo:</span>
-                    </label>
-                  </div>
+                      <div className="space-y-2">
+                        <label className="flex items-center gap-2 text-xs text-slate-300 cursor-pointer">
+                          <input
+                            type="radio"
+                            name="reassign_opt"
+                            checked={reassignOption === 'unassign'}
+                            onChange={() => setReassignOption('unassign')}
+                            className="text-blue-600 focus:ring-0"
+                          />
+                          <span>Dejar cuentas en estado <strong>&quot;SIN ASIGNAR&quot;</strong></span>
+                        </label>
 
-                  {reassignOption === 'reassign' && (
-                    <select
-                      value={targetReassignGestor}
-                      onChange={(e) => setTargetReassignGestor(e.target.value)}
-                      className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-blue-500"
-                    >
-                      {gestores
-                        .filter((g) => g.id !== deletingGestor.id)
-                        .map((g) => (
-                          <option key={g.id} value={g.gestor}>
-                            {g.gestor} ({g.cuentas_asignadas} cuentas actuales)
-                          </option>
-                        ))}
-                    </select>
+                        <label className="flex items-center gap-2 text-xs text-slate-300 cursor-pointer">
+                          <input
+                            type="radio"
+                            name="reassign_opt"
+                            checked={reassignOption === 'reassign'}
+                            onChange={() => setReassignOption('reassign')}
+                            className="text-blue-600 focus:ring-0"
+                          />
+                          <span>Reasignar cartera a otro gestor activo:</span>
+                        </label>
+                      </div>
+
+                      {reassignOption === 'reassign' && (
+                        <select
+                          value={targetReassignGestor}
+                          onChange={(e) => setTargetReassignGestor(e.target.value)}
+                          className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-blue-500"
+                        >
+                          {gestores
+                            .filter((g) => g.id !== deletingGestor.id)
+                            .map((g) => (
+                              <option key={g.id} value={g.gestor}>
+                                {g.gestor} ({g.cuentas_asignadas} cuentas actuales)
+                              </option>
+                            ))}
+                        </select>
+                      )}
+                    </div>
                   )}
                 </div>
               ) : (
@@ -917,8 +977,11 @@ export default function AdminGestoresPage() {
                 <button
                   type="button"
                   onClick={handleConfirmDelete}
-                  disabled={deleting}
-                  className="flex items-center gap-2 bg-red-600 hover:bg-red-500 text-white font-semibold px-5 py-2 rounded-xl text-sm transition-all shadow-lg shadow-red-500/20 active:scale-95 disabled:opacity-50"
+                  disabled={
+                    deleting ||
+                    (!isMasterOrSuper && (deletingGestor.cuentas_asignadas || 0) > 0 && (!targetReassignGestor || targetReassignGestor.trim() === ''))
+                  }
+                  className="flex items-center gap-2 bg-red-600 hover:bg-red-500 text-white font-semibold px-5 py-2 rounded-xl text-sm transition-all shadow-lg shadow-red-500/20 active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed"
                 >
                   {deleting && <Loader2 className="w-4 h-4 animate-spin" />}
                   <span>Confirmar Eliminación</span>

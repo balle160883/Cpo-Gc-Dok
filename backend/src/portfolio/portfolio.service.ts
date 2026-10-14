@@ -1235,8 +1235,37 @@ export class PortfolioService {
     const gestorName = targetGestor.gestor;
     let cuentasAfectadas = 0;
     if (gestorName) {
+      // Consultar cuántas cuentas activas tiene asignadas este gestor
+      const countRes = await this.supabaseService.query(
+        `SELECT COUNT(*)::int as total 
+         FROM asignacion_gestores 
+         WHERE TRIM(UPPER("GESTOR ASIGNADO")) = TRIM(UPPER($1))
+           AND "SITUACIÓN DEL CRÉDITO" != 'LIQUIDADO'`,
+        [gestorName]
+      );
+      const totalAsignadas = countRes.rows[0]?.total || 0;
+
+      // REGLA: Si el usuario solicitante es un rol 'admin' regular (no es el Administrador Principal ni Superadmin)
+      // y el gestor a eliminar tiene cuentas asignadas, es OBLIGATORIO reasignarlas a otro gestor.
+      if (!isMasterOrSuper && totalAsignadas > 0) {
+        if (!reassignTo || reassignTo.trim() === '' || reassignTo.trim() === 'unassign') {
+          throw new BadRequestException(
+            `Este gestor tiene ${totalAsignadas} cuentas asignadas activas. Como Administrador, es obligatorio reasignar su cartera a otro gestor antes de poder eliminarlo.`
+          );
+        }
+      }
+
       if (reassignTo && reassignTo.trim() !== '' && reassignTo.trim() !== 'unassign') {
         const reassignName = reassignTo.trim().toUpperCase();
+        // Verificar que el gestor destino exista
+        const destCheck = await this.supabaseService.query(
+          `SELECT id, gestor FROM usuarios_gestor WHERE TRIM(UPPER(gestor)) = TRIM(UPPER($1)) LIMIT 1`,
+          [reassignName]
+        );
+        if (!destCheck.rows || destCheck.rows.length === 0) {
+          throw new BadRequestException(`El gestor de destino "${reassignName}" no existe en el sistema.`);
+        }
+
         const updateAsign = await this.supabaseService.query(
           `UPDATE asignacion_gestores 
            SET "GESTOR ASIGNADO" = $1 
