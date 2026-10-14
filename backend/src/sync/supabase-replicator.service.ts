@@ -8,7 +8,9 @@ export class SupabaseReplicatorService implements OnModuleInit, OnModuleDestroy 
   private readonly logger = new Logger(SupabaseReplicatorService.name);
   private supabase: SupabaseClient | null = null;
   private timer: NodeJS.Timeout | null = null;
+  private repairTimer: NodeJS.Timeout | null = null;
   private isSyncing = false;
+  private isRepairing = false;
 
   constructor(
     private readonly db: DatabaseService,
@@ -42,11 +44,19 @@ export class SupabaseReplicatorService implements OnModuleInit, OnModuleDestroy 
 
     // Bucle continuo cada 25 segundos
     this.timer = setInterval(() => this.replicateLatest(), 25000);
+
+    // Auto-reparador continuo de avales según situación y pagos del socio
+    // Primer escaneo a los 12 segundos, luego cada 5 minutos
+    setTimeout(() => this.autoRepairAvalesStatus(), 12000);
+    this.repairTimer = setInterval(() => this.autoRepairAvalesStatus(), 5 * 60 * 1000);
   }
 
   onModuleDestroy() {
     if (this.timer) {
       clearInterval(this.timer);
+    }
+    if (this.repairTimer) {
+      clearInterval(this.repairTimer);
     }
   }
 
@@ -64,8 +74,14 @@ export class SupabaseReplicatorService implements OnModuleInit, OnModuleDestroy 
         .order('created_at', { ascending: false })
         .limit(60);
 
+      let detectoNuevoPago = false;
+
       if (!errInt && interacciones && interacciones.length > 0) {
         for (const row of interacciones) {
+          if (row.resultado === 'ya_pago') {
+            detectoNuevoPago = true;
+          }
+
           const q = `
             INSERT INTO cobranza_interacciones (
               id, socio_id, prestamo_id, gestor_id, fecha_gestion, tipo_contacto,
@@ -99,6 +115,14 @@ export class SupabaseReplicatorService implements OnModuleInit, OnModuleDestroy 
             row.fecha_inicio_gestion,
           ]);
         }
+      }
+
+      // Si detectó un 'ya_pago' entrante, disparar auto-reparación inmediata
+      if (detectoNuevoPago) {
+        this.logger.log('💳 Nuevo reporte "ya_pago" detectado. Ejecutando auto-reparación inmediata...');
+        this.autoRepairAvalesStatus().catch(e => {
+          this.logger.error(`Error en autoRepairAvalesStatus post-pago: ${e.message}`);
+        });
       }
 
       // 2. Sincronizar últimas promesas
@@ -159,6 +183,146 @@ export class SupabaseReplicatorService implements OnModuleInit, OnModuleDestroy 
       this.logger.error(`Error en ciclo de replicación continua: ${e.message}`);
     } finally {
       this.isSyncing = false;
+    }
+  }
+
+  /**
+   * Auto-reparación y sincronización de estatus de avales según situación del crédito y pagos
+   * 1. Verifica en Dokploy PostgreSQL qué cuentas ya pagaron, tienen mora 0 o saldo 0.
+   * 2. Ajusta en Dokploy y en Supabase Cloud:
+   *    - Cuentas sin mora o pagadas -> 'AL CORRIENTE - <GESTOR>' (no visible en app móvil)
+   *    - Cuentas con mora activa real -> '<GESTOR>' (visible en app móvil)
+   */
+  public async autoRepairAvalesStatus() {
+    if (this.isRepairing || !this.supabase) return;
+    this.isRepairing = true;
+
+    try {
+      const pool = this.db.getPool();
+
+      // A. Identificar en Dokploy avales que deben ser resguardados
+      // (Titular sin crédito, con mora <= 0, con saldo <= 0, liquidado, o con gestión 'ya_pago' este mes)
+      const resguardoQuery = `
+        WITH cuentas_al_corriente AS (
+          SELECT "NoCUENTA" FROM asignacion_gestores
+          WHERE COALESCE("DIAS MORA", 0) <= 0 
+             OR COALESCE("SALDO AL DIA", 0) <= 0
+             OR "SITUACIÓN DEL CRÉDITO" IN ('AL CORRIENTE', 'LIQUIDADO')
+             OR "GESTOR ASIGNADO" ILIKE 'AL CORRIENTE - %'
+          UNION
+          SELECT num_cuenta FROM cobranza_interacciones
+          WHERE resultado = 'ya_pago' 
+            AND fecha_gestion >= date_trunc('month', CURRENT_DATE)
+            AND num_cuenta IS NOT NULL
+        )
+        UPDATE asignacion_avales
+        SET gestor_asignado = 'AL CORRIENTE - ' || TRIM(REGEXP_REPLACE(gestor_asignado, '^AL CORRIENTE - ', '', 'i'))
+        WHERE (
+          num_cuenta IN (SELECT "NoCUENTA" FROM cuentas_al_corriente)
+          OR num_cuenta NOT IN (SELECT "NoCUENTA" FROM asignacion_gestores)
+        )
+        AND gestor_asignado NOT ILIKE 'AL CORRIENTE - %'
+        RETURNING id, num_cuenta, gestor_asignado;
+      `;
+
+      const dokResguardados = await pool.query(resguardoQuery);
+
+      // B. Identificar en Dokploy avales que deben reactivarse
+      // (Titular con crédito moroso activo, saldo > 0, mora > 0 y sin 'ya_pago' este mes)
+      const reactivarQuery = `
+        WITH cuentas_mora_activa AS (
+          SELECT "NoCUENTA" FROM asignacion_gestores
+          WHERE COALESCE("DIAS MORA", 0) > 0 
+            AND COALESCE("SALDO AL DIA", 0) > 0
+            AND "SITUACIÓN DEL CRÉDITO" NOT IN ('AL CORRIENTE', 'LIQUIDADO')
+            AND "GESTOR ASIGNADO" NOT ILIKE 'AL CORRIENTE - %'
+            AND "NoCUENTA" NOT IN (
+              SELECT num_cuenta FROM cobranza_interacciones
+              WHERE resultado = 'ya_pago' 
+                AND fecha_gestion >= date_trunc('month', CURRENT_DATE)
+                AND num_cuenta IS NOT NULL
+            )
+        )
+        UPDATE asignacion_avales
+        SET gestor_asignado = TRIM(REGEXP_REPLACE(gestor_asignado, '^AL CORRIENTE - ', '', 'i'))
+        WHERE num_cuenta IN (SELECT "NoCUENTA" FROM cuentas_mora_activa)
+        AND gestor_asignado ILIKE 'AL CORRIENTE - %'
+        RETURNING id, num_cuenta, gestor_asignado;
+      `;
+
+      const dokReactivados = await pool.query(reactivarQuery);
+
+      const totalModificadosDokploy = (dokResguardados.rowCount || 0) + (dokReactivados.rowCount || 0);
+
+      // Si hubo cambios en Dokploy, replicarlos inmediatamente a Supabase Cloud
+      if (dokResguardados.rows.length > 0) {
+        for (const row of dokResguardados.rows) {
+          await this.supabase
+            .from('asignacion_avales')
+            .update({ gestor_asignado: row.gestor_asignado })
+            .eq('id', row.id);
+        }
+      }
+
+      if (dokReactivados.rows.length > 0) {
+        for (const row of dokReactivados.rows) {
+          await this.supabase
+            .from('asignacion_avales')
+            .update({ gestor_asignado: row.gestor_asignado })
+            .eq('id', row.id);
+        }
+      }
+
+      // C. Verificación de seguridad en Supabase Cloud
+      // Buscar si en Supabase Cloud existe algún aval con mora 0 que siga visible
+      const { data: supaLimpios, error: supaErr } = await this.supabase
+        .from('asignacion_avales')
+        .select('id, num_cuenta, gestor_asignado')
+        .not('gestor_asignado', 'ilike', 'AL CORRIENTE - %')
+        .limit(200);
+
+      let supaReparados = 0;
+      if (!supaErr && supaLimpios && supaLimpios.length > 0) {
+        // Consultar cuáles de estas cuentas no deberían estar visibles
+        const cuentasToCheck = supaLimpios.map(s => s.num_cuenta).filter(Boolean);
+        if (cuentasToCheck.length > 0) {
+          const checkRes = await pool.query(`
+            SELECT "NoCUENTA" FROM asignacion_gestores
+            WHERE "NoCUENTA" = ANY($1::text[])
+              AND (
+                COALESCE("DIAS MORA", 0) <= 0 
+                OR COALESCE("SALDO AL DIA", 0) <= 0 
+                OR "SITUACIÓN DEL CRÉDITO" IN ('AL CORRIENTE', 'LIQUIDADO')
+                OR "GESTOR ASIGNADO" ILIKE 'AL CORRIENTE - %'
+              )
+            UNION
+            SELECT num_cuenta FROM cobranza_interacciones
+            WHERE num_cuenta = ANY($1::text[])
+              AND resultado = 'ya_pago'
+              AND fecha_gestion >= date_trunc('month', CURRENT_DATE);
+          `, [cuentasToCheck]);
+
+          const invalidSet = new Set(checkRes.rows.map(r => r.NoCUENTA || r.num_cuenta));
+
+          for (const s of supaLimpios) {
+            if (invalidSet.has(s.num_cuenta)) {
+              const nuevo = `AL CORRIENTE - ${s.gestor_asignado.replace(/^AL CORRIENTE - /i, '').trim()}`;
+              await this.supabase.from('asignacion_avales').update({ gestor_asignado: nuevo }).eq('id', s.id);
+              supaReparados++;
+            }
+          }
+        }
+      }
+
+      if (totalModificadosDokploy > 0 || supaReparados > 0) {
+        this.logger.log(
+          `🛡️ Auto-reparación ejecutada con éxito: Dokploy (Resguardados: ${dokResguardados.rowCount}, Reactivados: ${dokReactivados.rowCount}), Supabase Cloud ajustados: ${supaReparados}`
+        );
+      }
+    } catch (err: any) {
+      this.logger.error(`Error en ciclo de auto-reparación de avales: ${err.message}`);
+    } finally {
+      this.isRepairing = false;
     }
   }
 }

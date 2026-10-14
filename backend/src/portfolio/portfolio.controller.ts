@@ -1,4 +1,4 @@
-import { Controller, Get, Param, Query, UseGuards, Request, Patch, Body, Post, Delete, UseInterceptors, UploadedFile } from '@nestjs/common';
+import { Controller, Get, Param, Query, UseGuards, Request, Patch, Body, Post, Put, Delete, UseInterceptors, UploadedFile, ForbiddenException } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { PortfolioService } from './portfolio.service';
 import { AuthGuard } from '@nestjs/passport';
@@ -128,6 +128,49 @@ export class PortfolioController {
   @Post('geocodificar-pendientes')
   async geocodificarPendientes() {
     return this.portfolioService.geocodificarPendientes();
+  }
+
+  private checkAdminPermission(req: any) {
+    const user = req.user;
+    const email = (user?.email || '').toLowerCase().trim();
+    const isAdmin = 
+      user?.rol?.toLowerCase() === 'admin' || 
+      user?.rol?.toLowerCase() === 'superadmin' || 
+      email === 'ing.ballesteros16@gmail.com' ||
+      user?.gestor?.toUpperCase() === 'ADMINISTRADOR GLOBAL' ||
+      user?.gestor?.toUpperCase() === 'SUPERADMIN';
+
+    if (!isAdmin) {
+      throw new ForbiddenException('Acceso denegado: Se requieren permisos de administrador');
+    }
+  }
+
+  @Get('admin-gestores')
+  async getAdminGestores(@Request() req: any) {
+    this.checkAdminPermission(req);
+    return this.portfolioService.getAdminGestores();
+  }
+
+  @Post('admin-gestores')
+  async createAdminGestor(@Request() req: any, @Body() body: any) {
+    this.checkAdminPermission(req);
+    return this.portfolioService.createAdminGestor(body);
+  }
+
+  @Put('admin-gestores/:id')
+  async updateAdminGestor(@Request() req: any, @Param('id') id: string, @Body() body: any) {
+    this.checkAdminPermission(req);
+    return this.portfolioService.updateAdminGestor(id, body);
+  }
+
+  @Delete('admin-gestores/:id')
+  async deleteAdminGestor(
+    @Request() req: any, 
+    @Param('id') id: string, 
+    @Query('reassignTo') reassignTo?: string
+  ) {
+    this.checkAdminPermission(req);
+    return this.portfolioService.deleteAdminGestor(id, reassignTo, req.user?.email);
   }
 }
 

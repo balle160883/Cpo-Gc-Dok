@@ -1,6 +1,7 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, BadRequestException, NotFoundException } from '@nestjs/common';
 import { SupabaseService } from '../supabase/supabase.service';
 import * as XLSX from 'xlsx';
+import * as bcrypt from 'bcrypt';
 
 @Injectable()
 export class PortfolioService {
@@ -570,6 +571,10 @@ export class PortfolioService {
     this.logger.log(`Autocompletando latitud y longitud para ${assignments.length} avales...`);
     await this.enrichAssignmentsWithCoordinates(assignments);
 
+    // 3. Alinear gestor_asignado con el estado real del titular (Mora activa vs al corriente / ya pagó)
+    this.logger.log(`Alineando estado de mora y pagos del socio para ${assignments.length} avales...`);
+    await this.alignAvalesWithCreditStatus(assignments);
+
     this.logger.log(`Limpiando tabla asignacion_avales e importando ${assignments.length} registros con coordenadas...`);
     // Borrar de forma segura ahora que sabemos que tenemos datos listos para insertar
     await this.supabaseService.getClient().from('asignacion_avales').delete().neq('id', '00000000-0000-0000-0000-000000000000');
@@ -587,14 +592,14 @@ export class PortfolioService {
       }
     }
 
-    // Replicar en Supabase Cloud con latitud y longitud
+    // Replicar en Supabase Cloud con lotes optimizados de 50 para evitar timeouts
     try {
       const cloudClient = this.supabaseService.getCloudClient();
       if (cloudClient) {
-        this.logger.log(`Sincronizando ${assignments.length} avales con coordenadas a Supabase Cloud...`);
+        this.logger.log(`Sincronizando ${assignments.length} avales clasificados a Supabase Cloud...`);
         await cloudClient.from('asignacion_avales').delete().neq('id', '00000000-0000-0000-0000-000000000000');
-        for (let i = 0; i < assignments.length; i += 200) {
-          const batch = assignments.slice(i, i + 200);
+        for (let i = 0; i < assignments.length; i += 50) {
+          const batch = assignments.slice(i, i + 50);
           const { error: cloudErr } = await cloudClient.from('asignacion_avales').insert(batch);
           if (cloudErr) {
             this.logger.error(`Error en lote Supabase Cloud ${i}: ${cloudErr.message}`);
@@ -962,5 +967,244 @@ export class PortfolioService {
       this.logger.error(`Error al disparar geocodificación: ${err?.message || err}`);
       return { success: false, error: err?.message || String(err) };
     }
+  }
+
+  async alignAvalesWithCreditStatus(assignments: any[]) {
+    try {
+      // 1. Obtener créditos de asignacion_gestores
+      const resCreditos = await this.supabaseService.query(`
+        SELECT "NoCUENTA", "DIAS MORA", "SALDO AL DIA", "SITUACIÓN DEL CRÉDITO", "GESTOR ASIGNADO"
+        FROM asignacion_gestores;
+      `);
+      const creditosMap = new Map<string, any>();
+      for (const row of resCreditos?.rows || []) {
+        creditosMap.set(String(row.NoCUENTA || '').trim(), row);
+      }
+
+      // 2. Obtener cuentas con pago registrado en el mes actual ('ya_pago')
+      const inicioMes = new Date();
+      inicioMes.setDate(1);
+      inicioMes.setHours(0, 0, 0, 0);
+
+      const resPagos = await this.supabaseService.query(`
+        SELECT DISTINCT num_cuenta 
+        FROM cobranza_interacciones 
+        WHERE resultado = 'ya_pago' 
+          AND fecha_gestion >= $1
+          AND num_cuenta IS NOT NULL;
+      `, [inicioMes.toISOString()]);
+      const pagadasSet = new Set<string>();
+      for (const row of resPagos?.rows || []) {
+        pagadasSet.add(String(row.num_cuenta || '').trim());
+      }
+
+      // 3. Aplicar regla de resguardo o activación a cada aval
+      let resguardados = 0;
+      let activos = 0;
+
+      for (const a of assignments) {
+        const cuenta = String(a.num_cuenta || '').trim();
+        let gestorBase = String(a.gestor_asignado || '').trim();
+        gestorBase = gestorBase.replace(/^AL CORRIENTE - /i, '').trim();
+
+        const credito = creditosMap.get(cuenta);
+
+        const sinCredito = !credito;
+        const yaPago = pagadasSet.has(cuenta);
+        const moraCero = credito && (Number(credito['DIAS MORA']) <= 0 || Number(credito['SALDO AL DIA']) <= 0);
+        const alCorriente = credito && (
+          ['AL CORRIENTE', 'LIQUIDADO'].includes(credito['SITUACIÓN DEL CRÉDITO']) ||
+          String(credito['GESTOR ASIGNADO'] || '').startsWith('AL CORRIENTE - ')
+        );
+
+        if (sinCredito || yaPago || moraCero || alCorriente) {
+          a.gestor_asignado = `AL CORRIENTE - ${gestorBase}`;
+          resguardados++;
+        } else {
+          a.gestor_asignado = gestorBase;
+          activos++;
+        }
+      }
+
+      this.logger.log(`Alineación completada: ${activos} avales con mora activa, ${resguardados} en resguardo ('AL CORRIENTE - ').`);
+    } catch (e: any) {
+      this.logger.error(`Error en alignAvalesWithCreditStatus: ${e.message}`);
+    }
+  }
+
+  async getAdminGestores() {
+    const q = `
+      SELECT 
+        u.id, 
+        u.email, 
+        u.gestor, 
+        u.rol, 
+        u.created_at,
+        COALESCE(a.total_asignadas, 0)::int as cuentas_asignadas,
+        COALESCE(i.total_gestiones, 0)::int as total_gestiones
+      FROM usuarios_gestor u
+      LEFT JOIN (
+        SELECT "GESTOR ASIGNADO", COUNT(*) as total_asignadas 
+        FROM asignacion_gestores 
+        WHERE "SITUACIÓN DEL CRÉDITO" != 'LIQUIDADO'
+        GROUP BY "GESTOR ASIGNADO"
+      ) a ON TRIM(UPPER(a."GESTOR ASIGNADO")) = TRIM(UPPER(u.gestor))
+      LEFT JOIN (
+        SELECT gestor_id, COUNT(*) as total_gestiones
+        FROM cobranza_interacciones
+        GROUP BY gestor_id
+      ) i ON i.gestor_id = u.id
+      ORDER BY 
+        CASE 
+          WHEN u.rol = 'superadmin' THEN 1
+          WHEN u.rol = 'admin' THEN 2
+          ELSE 3
+        END,
+        u.gestor ASC;
+    `;
+    const res = await this.supabaseService.query(q);
+    return res.rows || [];
+  }
+
+  async createAdminGestor(data: { email: string; gestor: string; password?: string; rol?: string }) {
+    const email = (data.email || '').trim().toLowerCase();
+    const gestorName = (data.gestor || '').trim().toUpperCase();
+    const rol = (data.rol || 'gestor').trim().toLowerCase();
+    const password = data.password ? data.password.trim() : 'Gestor2026@';
+
+    if (!email) {
+      throw new BadRequestException('El correo electrónico es requerido.');
+    }
+    if (!gestorName) {
+      throw new BadRequestException('El nombre del gestor es requerido.');
+    }
+
+    // Verificar si ya existe el correo
+    const existing = await this.supabaseService.query(
+      `SELECT id FROM usuarios_gestor WHERE LOWER(email) = LOWER($1) LIMIT 1`,
+      [email]
+    );
+    if (existing.rows && existing.rows.length > 0) {
+      throw new BadRequestException('Ya existe un usuario registrado con este correo electrónico.');
+    }
+
+    // Hash de contraseña con bcrypt
+    const passwordHash = await bcrypt.hash(password, 10);
+
+    const insertQ = `
+      INSERT INTO usuarios_gestor (email, gestor, rol, password_hash, created_at)
+      VALUES ($1, $2, $3, $4, NOW())
+      RETURNING id, email, gestor, rol, created_at;
+    `;
+    const res = await this.supabaseService.query(insertQ, [email, gestorName, rol, passwordHash]);
+    return res.rows[0];
+  }
+
+  async updateAdminGestor(id: string, data: { email?: string; gestor?: string; password?: string; rol?: string }) {
+    // Buscar usuario actual
+    const checkRes = await this.supabaseService.query(
+      `SELECT id, email, gestor, rol, password_hash FROM usuarios_gestor WHERE id = $1 LIMIT 1`,
+      [id]
+    );
+    if (!checkRes.rows || checkRes.rows.length === 0) {
+      throw new NotFoundException('Gestor no encontrado.');
+    }
+    const currentGestor = checkRes.rows[0];
+
+    const newEmail = data.email ? data.email.trim().toLowerCase() : currentGestor.email;
+    const newGestorName = data.gestor ? data.gestor.trim().toUpperCase() : currentGestor.gestor;
+    const newRol = data.rol ? data.rol.trim().toLowerCase() : currentGestor.rol;
+
+    // Si cambió el correo, validar duplicado
+    if (newEmail !== currentGestor.email) {
+      const existing = await this.supabaseService.query(
+        `SELECT id FROM usuarios_gestor WHERE LOWER(email) = LOWER($1) AND id != $2 LIMIT 1`,
+        [newEmail, id]
+      );
+      if (existing.rows && existing.rows.length > 0) {
+        throw new BadRequestException('El correo electrónico ya está en uso por otro usuario.');
+      }
+    }
+
+    let passwordHash = currentGestor.password_hash;
+    if (data.password && data.password.trim().length > 0) {
+      passwordHash = await bcrypt.hash(data.password.trim(), 10);
+    }
+
+    // Si cambió el nombre del gestor, actualizar también en asignacion_gestores y planificacion_rutas_diarias
+    if (newGestorName !== currentGestor.gestor) {
+      await this.supabaseService.query(
+        `UPDATE asignacion_gestores SET "GESTOR ASIGNADO" = $1 WHERE TRIM(UPPER("GESTOR ASIGNADO")) = TRIM(UPPER($2))`,
+        [newGestorName, currentGestor.gestor]
+      );
+      await this.supabaseService.query(
+        `UPDATE planificacion_rutas_diarias SET gestor_nombre = $1 WHERE TRIM(UPPER(gestor_nombre)) = TRIM(UPPER($2))`,
+        [newGestorName, currentGestor.gestor]
+      );
+    }
+
+    const updateQ = `
+      UPDATE usuarios_gestor
+      SET email = $1, gestor = $2, rol = $3, password_hash = $4
+      WHERE id = $5
+      RETURNING id, email, gestor, rol, created_at;
+    `;
+    const res = await this.supabaseService.query(updateQ, [newEmail, newGestorName, newRol, passwordHash, id]);
+    return res.rows[0];
+  }
+
+  async deleteAdminGestor(id: string, reassignTo?: string, requestingUserEmail?: string) {
+    const checkRes = await this.supabaseService.query(
+      `SELECT id, email, gestor, rol FROM usuarios_gestor WHERE id = $1 LIMIT 1`,
+      [id]
+    );
+    if (!checkRes.rows || checkRes.rows.length === 0) {
+      throw new NotFoundException('Gestor no encontrado.');
+    }
+    const targetGestor = checkRes.rows[0];
+
+    // Seguridad: Evitar eliminar a administradores críticos o auto-eliminación
+    if (targetGestor.email?.toLowerCase() === 'ing.ballesteros16@gmail.com') {
+      throw new BadRequestException('No se puede eliminar la cuenta principal de administración.');
+    }
+    if (requestingUserEmail && targetGestor.email?.toLowerCase() === requestingUserEmail.toLowerCase()) {
+      throw new BadRequestException('No puedes eliminar tu propia cuenta mientras estés en sesión activa.');
+    }
+
+    // Cuentas asignadas
+    const gestorName = targetGestor.gestor;
+    let cuentasAfectadas = 0;
+    if (gestorName) {
+      if (reassignTo && reassignTo.trim() !== '' && reassignTo.trim() !== 'unassign') {
+        const reassignName = reassignTo.trim().toUpperCase();
+        const updateAsign = await this.supabaseService.query(
+          `UPDATE asignacion_gestores 
+           SET "GESTOR ASIGNADO" = $1 
+           WHERE TRIM(UPPER("GESTOR ASIGNADO")) = TRIM(UPPER($2))`,
+          [reassignName, gestorName]
+        );
+        cuentasAfectadas = updateAsign.rowCount || 0;
+      } else {
+        const updateAsign = await this.supabaseService.query(
+          `UPDATE asignacion_gestores 
+           SET "GESTOR ASIGNADO" = 'SIN ASIGNAR' 
+           WHERE TRIM(UPPER("GESTOR ASIGNADO")) = TRIM(UPPER($2))`,
+          [gestorName]
+        );
+        cuentasAfectadas = updateAsign.rowCount || 0;
+      }
+    }
+
+    // Limpiar ubicaciones de tracking del gestor
+    await this.supabaseService.query(`DELETE FROM usuarios_locations WHERE gestor_id = $1`, [id]);
+
+    // Eliminar de usuarios_gestor
+    await this.supabaseService.query(`DELETE FROM usuarios_gestor WHERE id = $1`, [id]);
+
+    return {
+      success: true,
+      message: `Gestor "${targetGestor.gestor}" eliminado correctamente.`,
+      cuentasAfectadas,
+    };
   }
 }

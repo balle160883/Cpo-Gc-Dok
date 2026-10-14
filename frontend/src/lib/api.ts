@@ -289,4 +289,64 @@ export async function geocodificarSociosPendientes(): Promise<any> {
   return res.json();
 }
 
+export async function fetchAdminGestores(): Promise<any[]> {
+  const res = await fetch(`${API_URL}/portfolio/admin-gestores`, {
+    headers: getAuthHeader(),
+  });
+  if (!res.ok) {
+    const error = await res.json().catch(() => ({}));
+    throw new Error(error.message || 'Error al obtener la lista de gestores');
+  }
+  return res.json();
+}
+
+export async function createAdminGestor(data: { email: string; gestor: string; password?: string; rol?: string }): Promise<any> {
+  const res = await fetch(`${API_URL}/portfolio/admin-gestores`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...getAuthHeader(),
+    },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) {
+    const error = await res.json().catch(() => ({}));
+    throw new Error(error.message || 'Error al crear gestor');
+  }
+  return res.json();
+}
+
+export async function updateAdminGestor(id: string, data: { email?: string; gestor?: string; password?: string; rol?: string }): Promise<any> {
+  const res = await fetch(`${API_URL}/portfolio/admin-gestores/${encodeURIComponent(id)}`, {
+    method: 'PUT',
+    headers: {
+      'Content-Type': 'application/json',
+      ...getAuthHeader(),
+    },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) {
+    const error = await res.json().catch(() => ({}));
+    throw new Error(error.message || 'Error al actualizar gestor');
+  }
+  return res.json();
+}
+
+export async function deleteAdminGestor(id: string, reassignTo?: string): Promise<any> {
+  const url = reassignTo && reassignTo.trim() !== ''
+    ? `${API_URL}/portfolio/admin-gestores/${encodeURIComponent(id)}?reassignTo=${encodeURIComponent(reassignTo)}`
+    : `${API_URL}/portfolio/admin-gestores/${encodeURIComponent(id)}`;
+
+  const res = await fetch(url, {
+    method: 'DELETE',
+    headers: getAuthHeader(),
+  });
+  if (!res.ok) {
+    const error = await res.json().catch(() => ({}));
+    throw new Error(error.message || 'Error al eliminar gestor');
+  }
+  return res.json();
+}
+
+
 
