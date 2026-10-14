@@ -1,4 +1,4 @@
-import { Injectable, Logger, BadRequestException, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, BadRequestException, NotFoundException, ForbiddenException } from '@nestjs/common';
 import { SupabaseService } from '../supabase/supabase.service';
 import * as XLSX from 'xlsx';
 import * as bcrypt from 'bcrypt';
@@ -1066,11 +1066,23 @@ export class PortfolioService {
     return res.rows || [];
   }
 
-  async createAdminGestor(data: { email: string; gestor: string; password?: string; rol?: string }) {
+  async createAdminGestor(data: { email: string; gestor: string; password?: string; rol?: string }, requestingUser?: any) {
     const email = (data.email || '').trim().toLowerCase();
     const gestorName = (data.gestor || '').trim().toUpperCase();
     const rol = (data.rol || 'gestor').trim().toLowerCase();
     const password = data.password ? data.password.trim() : 'Gestor2026@';
+
+    const reqEmail = (requestingUser?.email || '').trim().toLowerCase();
+    const reqRole = (requestingUser?.rol || '').trim().toLowerCase();
+    const isMasterOrSuper = 
+      reqEmail === 'ing.ballesteros16@gmail.com' || 
+      reqRole === 'superadmin' ||
+      requestingUser?.gestor?.toUpperCase() === 'SUPERADMIN';
+
+    // Un administrador normal no puede crear usuarios con rol superadmin
+    if (!isMasterOrSuper && rol === 'superadmin') {
+      throw new ForbiddenException('Solo un Superadmin puede asignar el rol de Superadmin.');
+    }
 
     if (!email) {
       throw new BadRequestException('El correo electrónico es requerido.');
@@ -1100,7 +1112,11 @@ export class PortfolioService {
     return res.rows[0];
   }
 
-  async updateAdminGestor(id: string, data: { email?: string; gestor?: string; password?: string; rol?: string }) {
+  async updateAdminGestor(
+    id: string, 
+    data: { email?: string; gestor?: string; password?: string; rol?: string },
+    requestingUser?: any
+  ) {
     // Buscar usuario actual
     const checkRes = await this.supabaseService.query(
       `SELECT id, email, gestor, rol, password_hash FROM usuarios_gestor WHERE id = $1 LIMIT 1`,
@@ -1110,6 +1126,33 @@ export class PortfolioService {
       throw new NotFoundException('Gestor no encontrado.');
     }
     const currentGestor = checkRes.rows[0];
+
+    // Verificar permisos jerárquicos
+    const reqEmail = (requestingUser?.email || '').trim().toLowerCase();
+    const reqRole = (requestingUser?.rol || '').trim().toLowerCase();
+    const isMasterOrSuper = 
+      reqEmail === 'ing.ballesteros16@gmail.com' || 
+      reqRole === 'superadmin' ||
+      requestingUser?.gestor?.toUpperCase() === 'SUPERADMIN';
+
+    const targetEmail = (currentGestor.email || '').trim().toLowerCase();
+    const targetRole = (currentGestor.rol || '').trim().toLowerCase();
+    const isTargetProtected = 
+      targetEmail === 'ing.ballesteros16@gmail.com' || 
+      targetEmail === 'superadmin@vesta-track.cloud' || 
+      targetRole === 'superadmin';
+
+    // Si el usuario objetivo está protegido y el solicitante es un admin normal, denegar edición
+    if (!isMasterOrSuper && isTargetProtected) {
+      throw new ForbiddenException(
+        'Los usuarios con rol Administrador no tienen autorización para editar al Administrador Principal o a cuentas Superadmin.'
+      );
+    }
+
+    // Un admin normal no puede promover a nadie a superadmin
+    if (!isMasterOrSuper && data.rol?.toLowerCase() === 'superadmin') {
+      throw new ForbiddenException('Solo un Superadmin puede asignar el rol de Superadmin.');
+    }
 
     const newEmail = data.email ? data.email.trim().toLowerCase() : currentGestor.email;
     const newGestorName = data.gestor ? data.gestor.trim().toUpperCase() : currentGestor.gestor;
@@ -1153,7 +1196,7 @@ export class PortfolioService {
     return res.rows[0];
   }
 
-  async deleteAdminGestor(id: string, reassignTo?: string, requestingUserEmail?: string) {
+  async deleteAdminGestor(id: string, reassignTo?: string, requestingUser?: any) {
     const checkRes = await this.supabaseService.query(
       `SELECT id, email, gestor, rol FROM usuarios_gestor WHERE id = $1 LIMIT 1`,
       [id]
@@ -1163,11 +1206,28 @@ export class PortfolioService {
     }
     const targetGestor = checkRes.rows[0];
 
+    const reqEmail = (requestingUser?.email || '').trim().toLowerCase();
+    const reqRole = (requestingUser?.rol || '').trim().toLowerCase();
+    const isMasterOrSuper = 
+      reqEmail === 'ing.ballesteros16@gmail.com' || 
+      reqRole === 'superadmin' ||
+      requestingUser?.gestor?.toUpperCase() === 'SUPERADMIN';
+
+    const targetEmail = (targetGestor.email || '').trim().toLowerCase();
+    const targetRole = (targetGestor.rol || '').trim().toLowerCase();
+    const isTargetProtected = 
+      targetEmail === 'ing.ballesteros16@gmail.com' || 
+      targetEmail === 'superadmin@vesta-track.cloud' || 
+      targetRole === 'superadmin';
+
     // Seguridad: Evitar eliminar a administradores críticos o auto-eliminación
-    if (targetGestor.email?.toLowerCase() === 'ing.ballesteros16@gmail.com') {
+    if (targetEmail === 'ing.ballesteros16@gmail.com') {
       throw new BadRequestException('No se puede eliminar la cuenta principal de administración.');
     }
-    if (requestingUserEmail && targetGestor.email?.toLowerCase() === requestingUserEmail.toLowerCase()) {
+    if (!isMasterOrSuper && isTargetProtected) {
+      throw new ForbiddenException('No tienes permisos para eliminar cuentas de Superadmin o Administrador Principal.');
+    }
+    if (reqEmail && targetEmail === reqEmail) {
       throw new BadRequestException('No puedes eliminar tu propia cuenta mientras estés en sesión activa.');
     }
 

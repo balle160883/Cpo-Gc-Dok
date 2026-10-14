@@ -154,13 +154,13 @@ export class PortfolioController {
   @Post('admin-gestores')
   async createAdminGestor(@Request() req: any, @Body() body: any) {
     this.checkAdminPermission(req);
-    return this.portfolioService.createAdminGestor(body);
+    return this.portfolioService.createAdminGestor(body, req.user);
   }
 
   @Put('admin-gestores/:id')
   async updateAdminGestor(@Request() req: any, @Param('id') id: string, @Body() body: any) {
     this.checkAdminPermission(req);
-    return this.portfolioService.updateAdminGestor(id, body);
+    return this.portfolioService.updateAdminGestor(id, body, req.user);
   }
 
   @Delete('admin-gestores/:id')
@@ -170,7 +170,7 @@ export class PortfolioController {
     @Query('reassignTo') reassignTo?: string
   ) {
     this.checkAdminPermission(req);
-    return this.portfolioService.deleteAdminGestor(id, reassignTo, req.user?.email);
+    return this.portfolioService.deleteAdminGestor(id, reassignTo, req.user);
   }
 }
 

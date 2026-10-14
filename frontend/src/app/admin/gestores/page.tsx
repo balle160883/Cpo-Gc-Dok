@@ -133,6 +133,29 @@ export default function AdminGestoresPage() {
     return { total, activosConCuentas, totalCuentas, totalGestiones };
   }, [gestores]);
 
+  // Verificar si el usuario en sesión es Administrador Principal o Superadmin
+  const isMasterOrSuper = useMemo(() => {
+    const email = (currentUser?.email || '').trim().toLowerCase();
+    const role = (currentUser?.rol || '').trim().toLowerCase();
+    const gestor = (currentUser?.gestor || '').toUpperCase();
+    return (
+      email === 'ing.ballesteros16@gmail.com' ||
+      role === 'superadmin' ||
+      gestor === 'SUPERADMIN'
+    );
+  }, [currentUser]);
+
+  // Determinar si una cuenta objetivo está protegida contra edición de administradores regulares
+  const isTargetProtected = (target: GestorUser) => {
+    const email = (target.email || '').trim().toLowerCase();
+    const role = (target.rol || '').trim().toLowerCase();
+    return (
+      email === 'ing.ballesteros16@gmail.com' ||
+      email === 'superadmin@vesta-track.cloud' ||
+      role === 'superadmin'
+    );
+  };
+
   // Filtro de búsqueda y rol
   const filteredGestores = useMemo(() => {
     return gestores.filter(g => {
@@ -161,6 +184,13 @@ export default function AdminGestoresPage() {
 
   // Abrir modal de edición
   const handleOpenEdit = (gestor: GestorUser) => {
+    if (!isMasterOrSuper && isTargetProtected(gestor)) {
+      setFeedback({
+        type: 'error',
+        message: 'No tienes autorización para editar al Administrador Principal o cuentas Superadmin.'
+      });
+      return;
+    }
     setIsEditing(true);
     setEditingId(gestor.id);
     setFormName(gestor.gestor || '');
@@ -224,6 +254,13 @@ export default function AdminGestoresPage() {
   const handleOpenDelete = (gestor: GestorUser) => {
     if (gestor.email?.toLowerCase() === 'ing.ballesteros16@gmail.com') {
       setFeedback({ type: 'error', message: 'No se puede eliminar la cuenta principal de administración.' });
+      return;
+    }
+    if (!isMasterOrSuper && isTargetProtected(gestor)) {
+      setFeedback({
+        type: 'error',
+        message: 'No tienes autorización para eliminar al Administrador Principal o cuentas Superadmin.'
+      });
       return;
     }
     if (currentUser?.email && gestor.email?.toLowerCase() === currentUser.email.toLowerCase()) {
@@ -330,7 +367,7 @@ export default function AdminGestoresPage() {
                 Administración de Gestores
               </h1>
               <p className="text-sm text-slate-400 mt-0.5">
-                Módulo exclusivo para <span className="text-blue-400 font-semibold">ing.ballesteros16@gmail.com</span> — Alta, edición, contraseñas y asignación de cartera.
+                Alta, edición, contraseñas y asignación de cartera de crédito.
               </p>
             </div>
           </div>
@@ -521,7 +558,15 @@ export default function AdminGestoresPage() {
               <tbody className="divide-y divide-slate-800/60 font-medium">
                 {filteredGestores.map((gestor) => {
                   const isProtected = gestor.email?.toLowerCase() === 'ing.ballesteros16@gmail.com';
+                  const isSuper = gestor.rol?.toLowerCase() === 'superadmin' || gestor.email?.toLowerCase() === 'superadmin@vesta-track.cloud';
+                  const isProtectedAccount = isTargetProtected(gestor);
                   const isMe = currentUser?.email && gestor.email?.toLowerCase() === currentUser.email.toLowerCase();
+
+                  const canEdit = isMasterOrSuper || !isProtectedAccount;
+                  const canDelete = 
+                    gestor.email?.toLowerCase() !== 'ing.ballesteros16@gmail.com' && 
+                    !isMe && 
+                    (isMasterOrSuper || !isProtectedAccount);
 
                   return (
                     <tr
@@ -543,6 +588,11 @@ export default function AdminGestoresPage() {
                             {isProtected && (
                               <span className="text-[10px] text-blue-400 font-semibold tracking-wide">
                                 Administrador Principal
+                              </span>
+                            )}
+                            {isSuper && (
+                              <span className="text-[10px] text-amber-400 font-semibold tracking-wide">
+                                Cuenta de Sistema
                               </span>
                             )}
                           </div>
@@ -596,15 +646,24 @@ export default function AdminGestoresPage() {
                       {/* Acciones */}
                       <td className="px-6 py-4 text-right">
                         <div className="flex items-center justify-end gap-2">
-                          <button
-                            onClick={() => handleOpenEdit(gestor)}
-                            className="p-2 rounded-lg bg-slate-800 hover:bg-blue-600/20 text-slate-300 hover:text-blue-400 transition-colors"
-                            title="Editar datos o contraseña"
-                          >
-                            <Edit3 className="w-4 h-4" />
-                          </button>
+                          {canEdit ? (
+                            <button
+                              onClick={() => handleOpenEdit(gestor)}
+                              className="p-2 rounded-lg bg-slate-800 hover:bg-blue-600/20 text-slate-300 hover:text-blue-400 transition-colors"
+                              title="Editar datos o contraseña"
+                            >
+                              <Edit3 className="w-4 h-4" />
+                            </button>
+                          ) : (
+                            <span
+                              className="p-2 rounded-lg bg-slate-800/40 text-slate-600 cursor-not-allowed"
+                              title="Cuenta protegida: No editable por Administradores"
+                            >
+                              <Lock className="w-4 h-4" />
+                            </span>
+                          )}
 
-                          {!isProtected && !isMe ? (
+                          {canDelete ? (
                             <button
                               onClick={() => handleOpenDelete(gestor)}
                               className="p-2 rounded-lg bg-slate-800 hover:bg-red-600/20 text-slate-300 hover:text-red-400 transition-colors"
@@ -615,7 +674,13 @@ export default function AdminGestoresPage() {
                           ) : (
                             <span
                               className="p-2 text-slate-600 cursor-not-allowed"
-                              title="Cuenta protegida"
+                              title={
+                                isProtected
+                                  ? 'Cuenta protegida (Administrador Principal)'
+                                  : isSuper
+                                  ? 'Cuenta protegida (Superadmin)'
+                                  : 'No puedes eliminar tu propia cuenta en sesión'
+                              }
                             >
                               <ShieldCheck className="w-4 h-4" />
                             </span>
