@@ -37,11 +37,7 @@ export class CrmController {
     const isTelefonista = req.user.rol?.toLowerCase() === 'telefonista';
     const rawGestorId = (req.user.rol === 'admin' || isTelefonista) ? gestorId : req.user.gestorId;
     const effectiveGestorId = (rawGestorId && rawGestorId.trim() !== '') ? rawGestorId : undefined;
-    const data = await this.crmService.getInteracciones(effectiveGestorId, startDate, endDate, search);
-    if (isTelefonista) {
-      return (data || []).filter((item: any) => item.tipo_gestion !== 'Visita');
-    }
-    return data;
+    return this.crmService.getInteracciones(effectiveGestorId, startDate, endDate, search);
   }
 
   @Get('promesas/pendientes')

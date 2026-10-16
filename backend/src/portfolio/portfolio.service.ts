@@ -592,20 +592,40 @@ export class PortfolioService {
       }
     }
 
-    // Replicar en Supabase Cloud con lotes optimizados de 50 para evitar timeouts
+    // Replicar en Supabase Cloud con lotes optimizados y reintentos automáticos
     try {
       const cloudClient = this.supabaseService.getCloudClient();
       if (cloudClient) {
-        this.logger.log(`Sincronizando ${assignments.length} avales clasificados a Supabase Cloud...`);
+        this.logger.log(`Sincronizando ${assignments.length} avales clasificados a Supabase Cloud con blindaje...`);
         await cloudClient.from('asignacion_avales').delete().neq('id', '00000000-0000-0000-0000-000000000000');
-        for (let i = 0; i < assignments.length; i += 50) {
-          const batch = assignments.slice(i, i + 50);
-          const { error: cloudErr } = await cloudClient.from('asignacion_avales').insert(batch);
-          if (cloudErr) {
-            this.logger.error(`Error en lote Supabase Cloud ${i}: ${cloudErr.message}`);
+        
+        const supaBatchSize = 100;
+        let supaInserted = 0;
+
+        for (let i = 0; i < assignments.length; i += supaBatchSize) {
+          const batch = assignments.slice(i, i + supaBatchSize);
+          let success = false;
+          let attempts = 0;
+
+          while (!success && attempts < 4) {
+            attempts++;
+            const { error: cloudErr } = await cloudClient.from('asignacion_avales').insert(batch);
+            if (!cloudErr) {
+              success = true;
+              supaInserted += batch.length;
+            } else {
+              this.logger.warn(`Intento ${attempts} falló en lote Supabase Cloud ${i}: ${cloudErr.message}`);
+              if (attempts < 4) {
+                await new Promise(resolve => setTimeout(resolve, 1500 * attempts));
+              }
+            }
+          }
+
+          if (!success) {
+            this.logger.error(`❌ Fallo crítico al insertar lote en Supabase Cloud a partir de índice ${i}`);
           }
         }
-        this.logger.log(`✅ Sincronización de avales a Supabase Cloud finalizada.`);
+        this.logger.log(`✅ Sincronización de avales a Supabase Cloud completada (${supaInserted}/${assignments.length}).`);
       }
     } catch (cloudErr: any) {
       this.logger.error(`Error al replicar en Supabase Cloud: ${cloudErr.message}`);

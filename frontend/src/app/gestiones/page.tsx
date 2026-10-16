@@ -65,7 +65,6 @@ export default function GestionesPage() {
       setIsAdmin(parsedUser.rol === 'admin');
       if (parsedUser.rol?.toLowerCase() === 'telefonista') {
         setIsTelefonista(true);
-        setSelectedType('Llamada');
       }
     }
   }, []);
@@ -131,10 +130,10 @@ export default function GestionesPage() {
   };
 
   useEffect(() => {
-    if (isAdmin) {
+    if (isAdmin || isTelefonista) {
       fetchAllGestores().then(setGestores).catch(console.error);
     }
-  }, [isAdmin]);
+  }, [isAdmin, isTelefonista]);
 
   const deduplicateInteraccionesFrontend = (items: any[]): any[] => {
     if (!items || items.length === 0) return [];
@@ -229,7 +228,7 @@ export default function GestionesPage() {
   };
 
   const handleExportExcel = () => {
-    const listToExport = filteredInteracciones.filter(item => !isTelefonista || item.tipo_gestion !== 'Visita');
+    const listToExport = filteredInteracciones;
     if (!listToExport || listToExport.length === 0) return;
     const dataToExport = listToExport.map(item => {
       const sujetoExcel = getSujetoEfectivo(item);
@@ -274,10 +273,7 @@ export default function GestionesPage() {
 
   // Filtrar interacciones por tipo, sujeto, resultado y término de búsqueda
   const filteredInteracciones = interacciones.filter(item => {
-    if (isTelefonista && item.tipo_gestion === 'Visita') return false;
-    const matchesType = selectedType === 'Todas' 
-      ? (!isTelefonista || item.tipo_gestion !== 'Visita')
-      : item.tipo_gestion === selectedType;
+    const matchesType = selectedType === 'Todas' || item.tipo_gestion === selectedType;
     const sujetoEfectivo = getSujetoEfectivo(item);
     const matchesSujeto = selectedSujeto === 'Todos' || sujetoEfectivo === selectedSujeto;
     const matchesResultado = selectedResultado === 'Todos' || item.resultado === selectedResultado;
@@ -313,28 +309,23 @@ export default function GestionesPage() {
     }
   };
 
-  const tabs: {id: GestionType, label: string}[] = isTelefonista
-    ? [
-        { id: 'Llamada', label: 'Llamadas' },
-        { id: 'Mensaje', label: 'Mensajes' }
-      ]
-    : [
-        { id: 'Todas', label: 'Todas' },
-        { id: 'Llamada', label: 'Llamadas' },
-        { id: 'Visita', label: 'Visitas' },
-        { id: 'Mensaje', label: 'Mensajes' }
-      ];
+  const tabs: {id: GestionType, label: string}[] = [
+    { id: 'Todas', label: 'Todas' },
+    { id: 'Visita', label: 'Visitas' },
+    { id: 'Llamada', label: 'Llamadas' },
+    { id: 'Mensaje', label: 'Mensajes' }
+  ];
 
   return (
     <div className="space-y-6">
       <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4">
         <div>
           <h1 className="text-2xl font-bold text-slate-900">
-            {isTelefonista ? 'Gestión Telefónica de Cobranza' : 'Historial de Gestiones'}
+            {isTelefonista ? 'Gestión y Seguimiento de Cobranza' : 'Historial de Gestiones'}
           </h1>
           <p className="text-slate-500 text-sm">
             {isTelefonista 
-              ? 'Panel exclusivo de llamadas y seguimiento telefónico a socios y avales.' 
+              ? 'Panel de seguimiento: llamadas, mensajes y consulta de visitas domiciliarias.' 
               : 'Registro cronológico de actividades de cobranza y contacto en campo.'}
           </p>
         </div>
@@ -413,7 +404,7 @@ export default function GestionesPage() {
             </div>
           )}
           
-          {isAdmin && (
+          {(isAdmin || isTelefonista) && (
             <div className="flex items-center gap-2 bg-white p-2 rounded-xl border border-slate-200 shadow-sm">
               <span className="text-[10px] font-bold text-slate-400 uppercase ml-2">Gestor:</span>
               <select 
@@ -421,7 +412,7 @@ export default function GestionesPage() {
                 onChange={(e) => { setSelectedGestor(e.target.value); setCurrentPage(1); }}
                 className="text-xs font-bold text-slate-700 focus:outline-none bg-transparent cursor-pointer"
               >
-                <option value="">Todos</option>
+                <option value="">Todos los Gestores</option>
                 {gestores.map(g => (
                   <option key={g.gestor_id} value={g.gestor_id}>{g.gestor_name}</option>
                 ))}

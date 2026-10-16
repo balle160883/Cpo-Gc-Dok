@@ -314,6 +314,73 @@ export class SupabaseReplicatorService implements OnModuleInit, OnModuleDestroy 
         }
       }
 
+      // D. Auto-sanación de integridad: verificar si faltan registros en Supabase Cloud
+      try {
+        const { count: supaTotal, error: countErr } = await this.supabase
+          .from('asignacion_avales')
+          .select('*', { count: 'exact', head: true });
+
+        const dokCountRes = await pool.query('SELECT count(*) FROM asignacion_avales');
+        const dokTotal = Number(dokCountRes.rows[0]?.count || 0);
+
+        if (!countErr && supaTotal !== null && supaTotal < dokTotal) {
+          this.logger.warn(
+            `⚠️ Discrepancia detectada en Supabase Cloud: tiene ${supaTotal} registros vs ${dokTotal} en Dokploy. Iniciando auto-sanación...`
+          );
+
+          // Obtener IDs existentes en Supabase Cloud
+          const { data: supaIdsData } = await this.supabase
+            .from('asignacion_avales')
+            .select('id');
+
+          const supaIdSet = new Set((supaIdsData || []).map((r: any) => r.id));
+
+          // Leer los registros completos de Dokploy
+          const allDokRes = await pool.query(`
+            SELECT 
+              id, num_cuenta, nombre_aval, domicilio_aval, colonia_aval,
+              municipio_aval, cp_aval, cruces_aval, estado_aval, telefono_aval,
+              gestor_asignado, tipo_aval, latitud::numeric, longitud::numeric
+            FROM asignacion_avales;
+          `);
+
+          const missingRows = (allDokRes.rows || []).filter((r: any) => !supaIdSet.has(r.id));
+
+          if (missingRows.length > 0) {
+            this.logger.log(`📤 Auto-sanación: Subiendo ${missingRows.length} avales faltantes a Supabase Cloud...`);
+            const batchSize = 100;
+            let recovered = 0;
+
+            for (let i = 0; i < missingRows.length; i += batchSize) {
+              const chunk = missingRows.slice(i, i + batchSize);
+              let success = false;
+              let attempts = 0;
+
+              while (!success && attempts < 3) {
+                attempts++;
+                const { error: insErr } = await this.supabase
+                  .from('asignacion_avales')
+                  .insert(chunk);
+
+                if (!insErr) {
+                  success = true;
+                  recovered += chunk.length;
+                } else {
+                  this.logger.warn(`Intento ${attempts} falló al auto-sanar avales: ${insErr.message}`);
+                  await new Promise(r => setTimeout(r, 1500));
+                }
+              }
+            }
+
+            this.logger.log(`🎉 Auto-sanación completada: ${recovered} avales restaurados en Supabase Cloud.`);
+          }
+        }
+      } catch (healErr: any) {
+        this.logger.error(`Error en auto-sanación de conteo de avales: ${healErr.message}`);
+      }
+
+
+
       if (totalModificadosDokploy > 0 || supaReparados > 0) {
         this.logger.log(
           `🛡️ Auto-reparación ejecutada con éxito: Dokploy (Resguardados: ${dokResguardados.rowCount}, Reactivados: ${dokReactivados.rowCount}), Supabase Cloud ajustados: ${supaReparados}`
